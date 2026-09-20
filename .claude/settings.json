@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["scripts/devlog.mjs", "start"],
+            "timeout": 30,
+            "statusMessage": "开发日志：创建当日文件"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["scripts/devlog.mjs", "end"],
+            "timeout": 30,
+            "statusMessage": "开发日志：记录会话结束"
+          }
+        ]
+      }
+    ]
+  }
+}
