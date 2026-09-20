@@ -1,0 +1,1573 @@
+/* 全局与组件样式。颜色一律用 theme.css 的变量（规范见 docs/design.md） */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  user-select: text;
+}
+
+ul {
+  list-style: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-2) 35%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-2) 60%, transparent);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+/* ---------- 外壳与页面骨架 ---------- */
+
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.page {
+  height: 100%;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 12px;
+}
+
+.page-title {
+  flex: 1;
+  font-size: 19px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 20px 24px;
+}
+
+.page-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- 按钮 ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 14px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #000);
+  border-color: color-mix(in srgb, var(--primary) 88%, #000);
+}
+
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn-danger-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+}
+
+.btn-danger-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.icon-btn.active {
+  color: var(--primary);
+}
+
+/* ---------- 头像 ---------- */
+
+.avatar {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+
+.avatar-fill {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+}
+
+.avatar-fill.avatar-placeholder {
+  font-size: 34px;
+}
+
+/* ---------- 搜索框 ---------- */
+
+.searchbar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.searchbar:focus-within {
+  border-color: var(--primary);
+}
+
+.searchbar-icon {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+
+.searchbar-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+}
+
+.searchbar-input::placeholder {
+  color: var(--text-2);
+}
+
+.searchbar-clear {
+  display: flex;
+  padding: 3px;
+  border-radius: 50%;
+  color: var(--text-2);
+}
+
+.searchbar-clear:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ---------- 卡片网格 ---------- */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 18px 16px;
+  align-items: start;
+}
+
+.card-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-tile-avatar {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.card-tile:hover .card-tile-avatar {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.card-tile-heart {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  transition: background 0.15s, color 0.15s;
+}
+
+.card-tile-heart:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.card-tile-heart.active {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.card-tile-name {
+  height: 20px;
+  line-height: 20px;
+  font-size: 14px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  aspect-ratio: 1;
+  height: auto;
+  border: 1.5px dashed var(--border);
+  border-radius: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 20px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.card-add:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.search-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+/* ---------- 底部导航 ---------- */
+
+.tabbar {
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.tabbar-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 0 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  transition: color 0.15s;
+}
+
+.tabbar-item:hover:not(.active) {
+  color: var(--text);
+}
+
+.tabbar-item.active {
+  color: var(--primary);
+}
+
+/* ---------- 空状态 ---------- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 64px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  color: var(--text-2);
+  opacity: 0.65;
+}
+
+.empty-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-2);
+  white-space: pre-line;
+}
+
+/* ---------- 表单 ---------- */
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.field-input,
+.field-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field-input:focus,
+.field-textarea:focus {
+  border-color: var(--primary);
+}
+
+.field-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.field-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* 提示里的警示句（如「地址已存在，保存会覆盖」） */
+.field-warn {
+  color: var(--danger);
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.switch-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ---------- 世界书条目 ---------- */
+
+.wb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.wb-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wb-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.wb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.wb-content {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+.wb-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+/* ---------- 弹层 ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fade-in 0.12s ease;
+}
+
+.modal-panel {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  animation: pop-in 0.14s ease;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 14px 8px 20px;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 20px 18px;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-panel {
+  width: 400px;
+  padding: 22px;
+}
+
+.confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.confirm-message {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* ---------- 浮出提示 ---------- */
+
+.toast-host {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-size: 14px;
+  animation: pop-in 0.14s ease;
+}
+
+.toast-ok svg {
+  color: var(--ok);
+}
+
+.toast-error svg {
+  color: var(--danger);
+}
+
+/* ---------- 卡片详情：对话列表 ---------- */
+
+.btn-block {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.conv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.conv-row:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.conv-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.conv-title {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-meta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.conv-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.conv-rename {
+  flex: 1;
+  margin: 4px;
+}
+
+/* ---------- 聊天 ---------- */
+
+.chat-header {
+  gap: 12px;
+}
+
+.chat-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-head-name {
+  font-size: 16px;
+}
+
+.chat-head-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble-row {
+  display: flex;
+}
+
+.bubble-row.from-user {
+  justify-content: flex-end;
+}
+
+/* 气泡 + 它下面的操作条：宽度上限挂在外面这层，操作条就不会把气泡挤窄 */
+.bubble-wrap {
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.bubble-row.from-user .bubble-wrap {
+  align-items: flex-end;
+}
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.bubble-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.bubble-user {
+  background: var(--bubble-user);
+  color: var(--bubble-user-text);
+}
+
+.bubble-ai {
+  background: var(--bubble-ai);
+  border: 1px solid var(--border);
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.bubble-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: currentColor;
+  animation: blink 1s step-start infinite;
+}
+
+.bubble-typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 14px;
+}
+
+.bubble-typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-2);
+  animation: typing 1.2s ease-in-out infinite;
+}
+
+.bubble-typing i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.bubble-typing i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* ---------- 消息操作条（悬停浮出）---------- */
+
+/* 平时不占视线也不吃点击，鼠标移到这条消息上（或里面有焦点）才淡入 */
+.msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.bubble-wrap:hover .msg-actions,
+.bubble-wrap:focus-within .msg-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg-action:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.msg-action-danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.msg-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 「已修改」小标签：跟操作条同一行，但没人悬停时也要看得见 */
+.msg-edited {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* ---------- 就地编辑 ---------- */
+
+.msg-edit {
+  width: 100%;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg-edit .field-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: 13px;
+}
+
+.chat-error-msg {
+  color: var(--danger);
+}
+
+.chat-error-detail {
+  font-size: 12px;
+  color: var(--text-2);
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ---------- 聊天页状态条（当前模型 · 输出方式，点击就地切换） ---------- */
+
+.chat-settings {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0 20px 4px;
+}
+
+.chat-settings-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.chat-settings-bar:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chat-settings-model {
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-settings-sep {
+  opacity: 0.6;
+}
+
+.chat-settings-arrow {
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.chat-settings-arrow.open {
+  transform: rotate(180deg);
+}
+
+/* 点面板外任意处关闭：全屏透明遮罩，压在面板下方 */
+.chat-settings-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.chat-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 20px;
+  right: 20px;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ---------- 聊天状态条：按供应商分组的模型列表 ---------- */
+
+.ms-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ms-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* 组标题 = 一条供应商的接口地址；点一下 = 只切换「使用中」 */
+.ms-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ms-head:hover {
+  color: var(--primary);
+}
+
+.ms-head-url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 组标题右侧那颗「使用中」小徽章 */
+.ms-head .provider-badge {
+  flex-shrink: 0;
+}
+
+.ms-items {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ms-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ms-item:hover {
+  background: var(--surface-2);
+}
+
+.ms-item.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* 打勾位：没选中的也占位，避免选中时文字左右跳动 */
+.ms-tick {
+  flex-shrink: 0;
+  width: 16px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.ms-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.ms-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.chat-input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input {
+  flex: 1;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.chat-input:focus {
+  border-color: var(--primary);
+}
+
+.btn-stop svg {
+  color: var(--danger);
+}
+
+/* ---------- 我的：收藏 / 历史 ---------- */
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.segmented-item {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+
+.segmented-item.active {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.mine-search {
+  margin-top: 12px;
+}
+
+.mine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.mine-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.mine-row:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.mine-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.mine-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mine-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mine-sub {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.mine-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+/* ---------- API 配置（供应商列表） ---------- */
+
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.provider-row:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+/* 使用中的那条：左侧主色竖条 + 主色描边 */
+.provider-row.active {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+}
+
+.provider-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 2px;
+  border-radius: 9px;
+}
+
+.provider-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 起过名称时：名称是主文字，接口地址缩成灰色小字跟在后面（过长各自省略） */
+.provider-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-addr {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.provider-badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.provider-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-dot {
+  margin: 0 6px;
+}
+
+.provider-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.provider-tip {
+  margin-top: 14px;
+}
+
+/* ---------- 挑常用模型（供应商表单里的二级弹窗） ---------- */
+
+/* 搜索框与「共 N 个 · 已选 M 个」一行放不下就换行 */
+.cm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cm-head .searchbar {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* 可勾选的模型清单：给个边框和限高，模型多的时候在框里滚 */
+.cm-list {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 300px;
+}
+
+/* ---------- 设置 ---------- */
+
+/* 灰字里嵌的可点文字（如「去『API 配置』添加」） */
+.btn-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* 「获取模型列表」一行：按钮 + 结果说明 */
+.fetch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-picker .model-select {
+  cursor: pointer;
+}
+
+.input-with-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-with-btn .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-btn {
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.chip-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 选中态（服务商快捷填充之外的单选组，如「接收方式」） */
+.chip-active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.field-range {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.test-result {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.test-result.ok {
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.test-result.bad {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.test-result-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.test-result.ok .test-result-line {
+  color: var(--ok);
+}
+
+.test-result.bad .test-result-line {
+  color: var(--danger);
+}
+
+.test-result-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  word-break: break-all;
+  user-select: text;
+}

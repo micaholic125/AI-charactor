@@ -1,0 +1,40 @@
+/* 主题变量：跟随系统浅色/深色（prefers-color-scheme 原生支持，无 JS 逻辑）
+   规范见 docs/design.md，所有组件颜色一律使用 var(--…) */
+
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --text: #1f2329;
+  --text-2: #8a9099;
+  --border: #e4e7ec;
+  --primary: #4c6fff;
+  --primary-text: #ffffff;
+  --danger: #e5484d;
+  --ok: #16a34a;
+  --bubble-user: #4c6fff;
+  --bubble-user-text: #ffffff;
+  --bubble-ai: #ffffff;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #141519;
+    --surface: #1d1f24;
+    --surface-2: #25272e;
+    --text: #e7e9ec;
+    --text-2: #8f949d;
+    --border: #2c2f36;
+    --primary: #6c87ff;
+    --primary-text: #ffffff;
+    --danger: #f26d72;
+    --ok: #3dd68c;
+    --bubble-user: #445edb;
+    --bubble-user-text: #ffffff;
+    --bubble-ai: #23252b;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+}
