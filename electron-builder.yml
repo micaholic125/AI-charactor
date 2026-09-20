@@ -1,0 +1,22 @@
+appId: com.aichatcards.app
+productName: AI聊天卡
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+asar: true
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: true
+  createDesktopShortcut: true
+  shortcutName: AI聊天卡
+  artifactName: AI聊天卡-Setup-${version}.exe
+portable:
+  artifactName: AI聊天卡-${version}-便携版.exe

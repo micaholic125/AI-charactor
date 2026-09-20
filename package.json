@@ -1,0 +1,34 @@
+{
+  "name": "ai-chat-cards",
+  "version": "0.1.0",
+  "description": "AI 聊天卡 - Windows AI 角色聊天应用",
+  "main": "./out/main/index.js",
+  "author": "AI聊天卡",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "build:win": "electron-vite build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.1.1",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "zustand": "5.0.15"
+  }
+}
