@@ -145,8 +145,9 @@ export function registerIpc(): void {
   )
 
   // 剪贴板：走主进程而不是 navigator.clipboard（后者依赖文档焦点，会偶发不生效）
-  ipcMain.handle(IPC.copyText, (_e, text: string) => {
-    clipboard.writeText(String(text ?? ''))
+  // Electron 44 起 clipboard 是异步的，必须 await——否则渲染层的 await copyText() 会先于写入返回
+  ipcMain.handle(IPC.copyText, async (_e, text: string) => {
+    await clipboard.writeText(String(text ?? ''))
   })
 
   // 聊天

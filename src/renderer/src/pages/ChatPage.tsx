@@ -7,6 +7,7 @@ import { useChatStore } from '../store/chatStore'
 import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
 import ChatSettingsBar from '../components/ChatSettingsBar'
+import MarkdownText from '../components/MarkdownText'
 import {
   ArrowLeftIcon,
   BranchIcon,
@@ -340,7 +341,14 @@ export default function ChatPage({ cardId, convId }: Props) {
           ) : (
             <>
               <div className={`bubble ${isUser ? 'bubble-user' : 'bubble-ai'}`}>
-                <span className="bubble-text">{m.content}</span>
+                {isUser ? (
+                  <span className="bubble-text">{m.content}</span>
+                ) : (
+                  // 只有已落盘的 AI 回复排版；用户消息照旧纯文本（见 docs/design.md §4）
+                  <div className="bubble-text-md">
+                    <MarkdownText content={m.content} />
+                  </div>
+                )}
               </div>
               {m.editedAt !== undefined && <span className="msg-edited">已修改</span>}
               <div className="msg-actions">

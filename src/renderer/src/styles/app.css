@@ -863,6 +863,218 @@ ul {
   user-select: text;
 }
 
+/* ---------- Markdown 排版（只用于已落盘的 AI 回复，见 docs/design.md §4）----------
+   容器用独立类名，不复用 .bubble-text：后者带 white-space: pre-wrap，而 Markdown
+   转出来的 DOM 含大量源码换行与缩进，pre-wrap 会把它们变成可见空白、段落被撑开一大截。 */
+
+.bubble-text-md {
+  word-break: break-word;
+  user-select: text;
+}
+
+/* 首尾子元素的外边距收掉，否则气泡上下会多出空白 */
+.bubble-text-md > :first-child {
+  margin-top: 0;
+}
+
+.bubble-text-md > :last-child {
+  margin-bottom: 0;
+}
+
+.bubble-text-md p {
+  margin: 0 0 8px;
+}
+
+.bubble-text-md h1,
+.bubble-text-md h2,
+.bubble-text-md h3,
+.bubble-text-md h4 {
+  margin: 14px 0 6px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.bubble-text-md h1 {
+  font-size: 18px;
+}
+
+.bubble-text-md h2 {
+  font-size: 16px;
+}
+
+.bubble-text-md h3 {
+  font-size: 15px;
+}
+
+.bubble-text-md h4 {
+  font-size: 14px;
+}
+
+.bubble-text-md ul,
+.bubble-text-md ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+
+.bubble-text-md li {
+  margin: 2px 0;
+}
+
+/* 列表项里的段落别再撑出一行高度 */
+.bubble-text-md li p {
+  margin: 0;
+}
+
+.bubble-text-md blockquote {
+  margin: 8px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--text-2);
+}
+
+.bubble-text-md hr {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* 链接：只上色、点了没有任何反应（不是 <a>，从根上没有跳转） */
+.md-link {
+  color: var(--primary);
+  word-break: break-all;
+}
+
+/* 图片：不加载，显示成占位文字 */
+.md-img {
+  color: var(--text-2);
+}
+
+/* 表格：外面套横向滚动容器，宽表格不撑破气泡 */
+.md-table-wrap {
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.md-table-wrap table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-table-wrap th,
+.md-table-wrap td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.md-table-wrap th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+/* 行内代码。注意排除 <pre> 里的那层——那是代码块，样式在下面单独写 */
+.bubble-text-md :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: Consolas, 'Cascadia Mono', ui-monospace, monospace;
+  font-size: 0.92em;
+}
+
+/* ---------- 代码块 ---------- */
+
+.md-pre {
+  position: relative;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+/* 长行横向滚动、不折行 */
+.md-pre pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md-pre code {
+  font-family: Consolas, 'Cascadia Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.md-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.md-copy:hover {
+  opacity: 1;
+  color: var(--text);
+}
+
+/* ---------- 语法高亮：配色用现有主题变量拼出来，不引 highlight.js 自带主题 ---------- */
+
+.md-pre .hljs-comment,
+.md-pre .hljs-quote {
+  color: var(--text-2);
+  font-style: italic;
+}
+
+.md-pre .hljs-keyword,
+.md-pre .hljs-literal,
+.md-pre .hljs-built_in,
+.md-pre .hljs-type,
+.md-pre .hljs-selector-tag,
+.md-pre .hljs-meta {
+  color: var(--primary);
+}
+
+.md-pre .hljs-string,
+.md-pre .hljs-regexp,
+.md-pre .hljs-addition,
+.md-pre .hljs-attribute {
+  color: var(--ok);
+}
+
+.md-pre .hljs-number,
+.md-pre .hljs-symbol,
+.md-pre .hljs-bullet,
+.md-pre .hljs-deletion {
+  color: var(--danger);
+}
+
+.md-pre .hljs-title,
+.md-pre .hljs-section,
+.md-pre .hljs-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.md-pre .hljs-emphasis {
+  font-style: italic;
+}
+
+.md-pre .hljs-strong {
+  font-weight: 600;
+}
+
 .bubble-user {
   background: var(--bubble-user);
   color: var(--bubble-user-text);

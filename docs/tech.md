@@ -1,7 +1,7 @@
 # 技术方案
 
 > 技术选型、数据模型、接口契约的权威标准。版本升级需先改本文档再动 package.json。
-> 最后更新：2026-09-19
+> 最后更新：2026-09-28
 
 ## 1. 技术选型（版本固定）
 
@@ -13,6 +13,9 @@
 | @vitejs/plugin-react | 5.2.0 | 6.x 需 vite 8，固定 5.x |
 | react / react-dom | 19.2.8 | UI 框架 |
 | zustand | 5.0.15 | 状态管理：导航 + 数据缓存 + 流式状态 |
+| react-markdown | 10.1.0 | AI 回复的 Markdown → React 元素。**不用 marked**：marked 产物是 HTML 字符串，要塞进页面就得 `dangerouslySetInnerHTML` 再配一个消毒库；react-markdown 产物是元素，全程不碰 innerHTML |
+| remark-gfm | 4.0.1 | 表格 / 删除线 / 任务列表 / 裸网址识别 |
+| rehype-highlight | 7.0.2 | 代码块语法高亮（lowlight → highlight.js 的 37 种常用语言；`highlight.js` 那 5.5MB 是全部 190 种语言的源码包，实际只打包用到的） |
 | electron-builder | 26.15.3 | 打包 NSIS 安装包 + 便携版 |
 | typescript | 5.9.3 | 不用 7.0（全新原生编译器，工具链风险） |
 | @types/react / @types/node | 19.2.18 / 26.4.1 | 仅类型 |
@@ -22,6 +25,7 @@
 - **所有依赖放 devDependencies**：electron-vite 全量打包进 out/，安装包不含 node_modules
 - package.json 不设 `"type":"module"`：main/preload 走 CommonJS 成熟路径
 - **零原生模块**（无 better-sqlite3 等），持久化用主进程 JSON 文件
+- **渲染层用成熟库、请求侧继续手写**：Markdown 的边界情况（嵌套列表、表格、代码围栏、行内代码与转义）太多，不值得手写，用 react-markdown 这条成熟链路；而请求侧的 SSE 解析只有几十行、格式完全固定，继续手写（见 §7）
 - 开发机需 Node ≥ 22.12
 
 ## 2. 目录结构
@@ -44,7 +48,7 @@ src/
       ├─ App.tsx            # 视图切换、TabBar、流式事件订阅、Toast/确认弹窗宿主
       ├─ store/appStore.ts + chatStore.ts
       ├─ pages/ HomePage / MinePage / CardDetailPage / CardEditorPage / ChatPage / SettingsPage
-      ├─ components/ TabBar / SearchBar / CardItem / Avatar / SegmentedControl / ConfirmDialog / Modal / WorldbookEntryModal / Toast / icons
+      ├─ components/ TabBar / SearchBar / CardItem / Avatar / SegmentedControl / ConfirmDialog / Modal / WorldbookEntryModal / CommonModelsModal / MarkdownText / Toast / icons
       ├─ utils/format.ts    # 相对时间、头像配色哈希、标题截断
       └─ styles/ theme.css（双配色变量）+ app.css
 ```
@@ -224,7 +228,11 @@ type ChatEvent =
 
 聊天数据流：渲染层 `chat.send()` 拿到 `{ok}` 后乐观显示用户气泡，随后只消费 `chat:event` 推送；`delta` 累加进气泡，`done`/`aborted` 定稿，`error` 在气泡上方显示中文横幅（`detail` 作灰色小字）。渲染层的流式状态以事件为准，不依赖 send 的返回值。
 
+`done` / `aborted` / `error` 到达后的收尾（重读对话让新回复上屏 + 撤掉流式气泡）必须写在**同一个 `set`** 里（`chatStore.settleStream`）。分两次 set 会漏出一帧「回复已经排版好、打字气泡却还在」的中间态——同一条回复显示两份。两次 set 之间隔着一次 IPC 往返，没人保证它们落在同一帧里（用 MutationObserver 逐帧抓到过）。
+
 渲染层约定：`pickAvatar` 返回的文件名只存编辑器内存，「保存」才写进卡片；「移除头像」同理只改内存字段，保存时由主进程删旧图。
+
+渲染层约定（Markdown 排版，`components/MarkdownText.tsx`）：只用于**已落盘的 AI 回复**（流式那半截照旧纯文本）。用 `react-markdown` 把内容转成 **React 元素**，全程**不使用** `dangerouslySetInnerHTML` / `innerHTML`，内容里的原始 HTML（`<script>`、`<img onerror=…>`）默认**不解析**、**按纯文字原样显示**（既不执行也不隐藏），因此不需要消毒库。链接渲染成 `<span>` 而不是 `<a>`、图片渲染成占位文字，所以**不放宽 CSP**（`img-src` 保持 `'self' data: app-media:`）、**不打开任何外部地址**。`content` 字段始终是**原始 Markdown 文本**——「复制」「修改」「撤回」、对话标题生成、世界书注入拿到的都是原文，渲染只是展示层的单向转换，**不涉及数据迁移**。
 
 ## 5. 头像管线
 

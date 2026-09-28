@@ -129,18 +129,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }
 }))
 
-/** 清掉某个键的流状态 */
-function clearStream(key: string): void {
+/**
+ * 流结束后的收尾：重读对话（回复已落盘）+ 撤掉流式气泡。
+ *
+ * **两件事必须在同一个 set 里做完**。分开两次 set 会漏出一帧「新回复已经排版好、
+ * 打字气泡却还在」的中间态——同一条回复显示两份（用 MutationObserver 逐帧抓到过）。
+ * 两次 set 之间隔着一次 IPC 往返，谁都保证不了它们落在同一帧里。
+ *
+ * `error` 有值时保留流状态（只是清空文字、退掉 pending），好让错误横幅挂在气泡上方。
+ */
+async function settleStream(
+  cardId: string,
+  convId: string,
+  key: string,
+  error?: { message: string; detail?: string }
+): Promise<void> {
+  const isOpen = useChatStore.getState().key === key
+  let messages: ChatMessage[] | null = null
+  let title: string | null = null
+  if (isOpen) {
+    try {
+      const conv = await window.api.convs.get(cardId, convId)
+      messages = conv?.messages ?? []
+      title = conv?.title ?? null
+    } catch {
+      /* 读不到就维持现状，别把界面清空 */
+    }
+  }
+
   useChatStore.setState((s) => {
     const streams = { ...s.streams }
-    delete streams[key]
-    return { streams }
+    if (error) streams[key] = { text: '', pending: false, error }
+    else delete streams[key]
+    // 不是当前打开的对话：只动流状态，别去碰别人正在看的消息
+    if (!isOpen) return { streams }
+    return {
+      messages: messages ?? s.messages,
+      title: title ?? s.title,
+      loading: false,
+      streams
+    }
   })
 }
 
 function handleEvent(ev: ChatEvent): void {
   const key = keyOf(ev.cardId, ev.convId)
-  const store = useChatStore.getState()
 
   if (ev.type === 'delta') {
     useChatStore.setState((s) => ({
@@ -153,23 +186,12 @@ function handleEvent(ev: ChatEvent): void {
     return
   }
 
-  // done / aborted：先重读对话（AI 消息已落盘），再撤掉流式气泡，避免闪烁
+  // done / aborted：重读对话（AI 消息已落盘）与撤掉流式气泡一次做完，不留重叠帧
   if (ev.type === 'done' || ev.type === 'aborted') {
-    void (async () => {
-      if (store.key === key) await store.open(ev.cardId, ev.convId, true)
-      clearStream(key)
-    })()
+    void settleStream(ev.cardId, ev.convId, key)
     return
   }
 
-  // error：半截文本同样已落盘，先重读再挂错误提示（失败原因给用户看）
-  void (async () => {
-    if (store.key === key) await store.open(ev.cardId, ev.convId, true)
-    useChatStore.setState((s) => ({
-      streams: {
-        ...s.streams,
-        [key]: { text: '', pending: false, error: { message: ev.message, detail: ev.detail } }
-      }
-    }))
-  })()
+  // error：半截文本同样已落盘，重读之后把错误提示挂上（失败原因给用户看）
+  void settleStream(ev.cardId, ev.convId, key, { message: ev.message, detail: ev.detail })
 }
