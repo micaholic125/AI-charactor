@@ -1240,10 +1240,15 @@ ul {
   position: relative;
   flex-shrink: 0;
   padding: 0 20px 4px;
+  /* 状态条 + 右侧的「参数」按钮排成一行；两个浮层是绝对定位，不参与这一行 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .chat-settings-bar {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1281,6 +1286,47 @@ ul {
 
 .chat-settings-arrow.open {
   transform: rotate(180deg);
+}
+
+/* ---------- 「参数」按钮（生成参数面板的入口）---------- */
+
+.chat-settings-params {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.chat-settings-params:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 本卡单独设过参数时的小圆点——不然界面上看不出这张卡有没有另设过 */
+.chat-settings-dot {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+/* 参数面板页脚：右对齐的按钮行 */
+.chat-params-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* 点面板外任意处关闭：全屏透明遮罩，压在面板下方 */

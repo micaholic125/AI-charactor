@@ -161,6 +161,21 @@ function persistCards(): Promise<void> {
   return enqueueWrite(cardsFile(), JSON.stringify(cards, null, 2))
 }
 
+/**
+ * 卡片级生成参数：只收合法值，**越界与垃圾一律当「没设」**（回落到全局设置），不报错。
+ * 判定必须用 `typeof x === 'number'`——`0` 是有效温度，靠真值判断会把「本卡设成 0」错当成「没设」。
+ * 范围与 settings:save 的校验保持一致（见 ipc.ts 的 validateSettings）。
+ */
+function pickCardTemperature(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2 ? v : undefined
+}
+
+function pickCardMaxTokens(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
+  const n = Math.floor(v)
+  return n >= 1 && n <= 131072 ? n : undefined
+}
+
 /** 新建（无 id 时分配 uuid）或更新卡片 */
 export async function saveCard(input: Card): Promise<Card> {
   const now = Date.now()
@@ -175,6 +190,9 @@ export async function saveCard(input: Card): Promise<Card> {
     model: (input.model ?? '').trim() || undefined,
     // 输出方式：只有真正的布尔才存（缺省 = 跟随设置）
     stream: typeof input.stream === 'boolean' ? input.stream : undefined,
+    // 生成参数：缺省 = 跟随设置（归一在校验里做一处，请求时直接用，不再兜底）
+    temperature: pickCardTemperature(input.temperature),
+    maxTokens: pickCardMaxTokens(input.maxTokens),
     createdAt: idx >= 0 ? cards[idx].createdAt : now,
     updatedAt: now
   }

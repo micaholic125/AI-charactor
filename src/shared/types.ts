@@ -23,6 +23,10 @@ export interface Card {
   worldbook: WorldbookEntry[]
   model?: string // 可选：该卡指定的模型；空/缺省 = 用设置里的默认模型
   stream?: boolean // 可选：该卡指定的输出方式（流式/非流式）；缺省 = 用设置里的默认
+  // 生成参数：缺省 = 用设置里的全局值。
+  // 判定一律用 typeof x === 'number'——0 是有效温度，靠真值判断会把「本卡设成 0」错当成「没设」
+  temperature?: number // 0–2（聊天页「调节参数」面板可改）
+  maxTokens?: number // 1–131072
   createdAt: number
   updatedAt: number
 }

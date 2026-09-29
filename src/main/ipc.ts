@@ -351,7 +351,12 @@ function resolveChatTarget(card: Card): {
     model: (card.model ?? '').trim() || provider.model,
     // stream 是布尔：false 是有效值，不能写成 settings.stream 的 falsy 回退
     stream: typeof card.stream === 'boolean' ? card.stream : settings.stream,
-    params: { temperature: settings.temperature, maxTokens: settings.maxTokens }
+    // 生成参数：卡片指定 > 设置里的全局值。
+    // 同样必须用 typeof 判断——0 是有效温度，真值判断会把「本卡设成 0」错当成「没设」
+    params: {
+      temperature: typeof card.temperature === 'number' ? card.temperature : settings.temperature,
+      maxTokens: typeof card.maxTokens === 'number' ? card.maxTokens : settings.maxTokens
+    }
   }
 }
 

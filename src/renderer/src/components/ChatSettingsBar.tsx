@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import type { Card, Provider } from '@shared/types'
 import { DEFAULT_PROVIDER_MODEL, DEFAULT_SETTINGS, providerLabel } from '@shared/types'
 import { useAppStore } from '../store/appStore'
-import { CheckIcon, ChevronDownIcon } from './icons'
+import { CheckIcon, ChevronDownIcon, SlidersIcon } from './icons'
 
 interface Props {
   card: Card
@@ -32,10 +32,16 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
   const navigate = useAppStore((s) => s.navigate)
 
   const [open, setOpen] = useState(false)
+  const [paramsOpen, setParamsOpen] = useState(false)
   const [providers, setProviders] = useState<Provider[]>([])
   const [currentId, setCurrentId] = useState('')
-  // 全局默认输出方式（这张卡没单独设过时用它）
+  // 这张卡没单独设过时用的全局默认值
   const [streamDefault, setStreamDefault] = useState(DEFAULT_SETTINGS.stream)
+  const [tempDefault, setTempDefault] = useState(DEFAULT_SETTINGS.temperature)
+  const [maxDefault, setMaxDefault] = useState(DEFAULT_SETTINGS.maxTokens)
+  // 最大长度是数字框：边打字边提交会把半截输入（刚敲的「4」）当成非法值，所以先存在草稿里，
+  // 失焦或回车才提交（滑条不存在这个问题，直接就落盘）
+  const [maxDraft, setMaxDraft] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -45,6 +51,8 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
           window.api.providers.list()
         ])
         setStreamDefault(settings.stream)
+        setTempDefault(settings.temperature)
+        setMaxDefault(settings.maxTokens)
         setCurrentId(settings.currentProviderId)
         setProviders(list)
       } catch {
@@ -58,6 +66,27 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
   const defaultModel = current?.model || DEFAULT_PROVIDER_MODEL
   const effectiveModel = cardModel !== '' ? cardModel : defaultModel
   const effectiveStream = typeof card.stream === 'boolean' ? card.stream : streamDefault
+  // 生成参数：本卡设过就用本卡的，没设过回落到全局。
+  // 判定必须用 typeof——0 是有效温度，真值判断会把「本卡设成 0」错当成「没设」
+  const hasTemp = typeof card.temperature === 'number'
+  const hasMax = typeof card.maxTokens === 'number'
+  const effectiveTemp = hasTemp ? (card.temperature as number) : tempDefault
+  const effectiveMax = hasMax ? (card.maxTokens as number) : maxDefault
+  const hasOwnParams = hasTemp || hasMax
+
+  /** 打开参数面板：把当前生效值灌进草稿，别让它停在半截输入上 */
+  const openParams = () => {
+    setMaxDraft(String(effectiveMax))
+    setOpen(false)
+    setParamsOpen(true)
+  }
+
+  /** 最大长度失焦/回车才提交；非法值退回显示当前生效值，不乱落盘 */
+  const commitMax = () => {
+    const n = Number(maxDraft)
+    if (Number.isInteger(n) && n >= 1 && n <= 131072) onPatch({ maxTokens: n })
+    else setMaxDraft(String(effectiveMax))
+  }
 
   /** 切换全局「使用中」的供应商 */
   const switchProvider = async (p: Provider) => {
@@ -113,7 +142,10 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
       <button
         className="chat-settings-bar"
         title="切换供应商 / 模型 / 输出方式"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setParamsOpen(false)
+          setOpen((v) => !v)
+        }}
       >
         <span className="chat-settings-model">
           {current ? barLabel(current) : '未配置供应商'} · {effectiveModel || '未设置模型'}
@@ -121,6 +153,17 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
         <span className="chat-settings-sep">·</span>
         <span>{effectiveStream ? '流式' : '非流式'}</span>
         <ChevronDownIcon size={15} className={`chat-settings-arrow${open ? ' open' : ''}`} />
+      </button>
+
+      {/* 参数单独开一个门，不塞进上面那个浮层——参数以后会越来越多，混在一起会把浮层拉长 */}
+      <button
+        className="chat-settings-params"
+        title="调节这张卡的生成参数（温度、最大长度）"
+        onClick={openParams}
+      >
+        <SlidersIcon size={14} />
+        参数
+        {hasOwnParams && <i className="chat-settings-dot" />}
       </button>
 
       {open && (
@@ -246,8 +289,75 @@ export default function ChatSettingsBar({ card, onPatch }: Props) {
             </div>
 
             <span className="field-hint">
-              供应商切换影响所有卡片；模型与输出方式只对这张卡生效。改完从下一条消息开始用新的。
+              供应商切换影响所有卡片；模型、输出方式与生成参数只对这张卡生效。改完从下一条消息开始用新的。
             </span>
+          </div>
+        </>
+      )}
+
+      {paramsOpen && (
+        <>
+          <div className="chat-settings-mask" onClick={() => setParamsOpen(false)} />
+          <div className="chat-settings-panel">
+            <div className="field">
+              <span className="field-label">这张卡的生成参数</span>
+              <span className="field-hint">
+                不设就跟着「设置」页里的全局值走；改完从下一条消息开始生效。
+              </span>
+            </div>
+
+            <label className="field">
+              <span className="field-label">
+                温度（越高回答越随机）：{effectiveTemp.toFixed(1)}
+              </span>
+              <input
+                className="field-range"
+                type="range"
+                min={0}
+                max={2}
+                step={0.1}
+                value={effectiveTemp}
+                onChange={(e) => onPatch({ temperature: Number(e.target.value) })}
+              />
+              <span className="field-hint">
+                {hasTemp ? '本卡单独设的' : `跟随全局（${tempDefault.toFixed(1)}）`}
+              </span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">单次回复最大长度</span>
+              <input
+                className="field-input"
+                type="number"
+                min={1}
+                max={131072}
+                value={maxDraft}
+                onChange={(e) => setMaxDraft(e.target.value)}
+                onBlur={commitMax}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+              />
+              <span className="field-hint">
+                {hasMax ? '本卡单独设的' : `跟随全局（${maxDefault}）`}
+              </span>
+            </label>
+
+            <div className="chat-params-actions">
+              <button
+                className="btn"
+                disabled={!hasOwnParams}
+                onClick={() => {
+                  setMaxDraft(String(maxDefault))
+                  onPatch({ temperature: undefined, maxTokens: undefined })
+                }}
+              >
+                恢复跟随全局
+              </button>
+              <button className="btn btn-primary" onClick={() => setParamsOpen(false)}>
+                完成
+              </button>
+            </div>
           </div>
         </>
       )}

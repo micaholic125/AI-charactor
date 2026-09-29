@@ -244,3 +244,20 @@ export function UndoIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** 调节参数（三条横线，各带一个滑块） */
+export function SlidersIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 7h4" />
+      <path d="M12 7h8" />
+      <circle cx="10" cy="7" r="2" />
+      <path d="M4 12h10" />
+      <path d="M18 12h2" />
+      <circle cx="16" cy="12" r="2" />
+      <path d="M4 17h2" />
+      <path d="M10 17h10" />
+      <circle cx="8" cy="17" r="2" />
+    </Icon>
+  )
+}
