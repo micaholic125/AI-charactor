@@ -3,3 +3,10 @@ out/
 release/
 *.log
 .DS_Store
+
+# 外部 AI 编程工具自动生成的残留（本项目只用 CLAUDE.md，见项目指引）。
+# 2026-09-28 出现过一次 AGENTS.md + .agents/（某个工具照 CLAUDE.md 生成的副本），
+# 两份项目规则并存会各自跑偏，已删除；加进这里免得下次再污染仓库。
+AGENTS.md
+.agents/
+
