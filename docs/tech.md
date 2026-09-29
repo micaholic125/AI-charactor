@@ -1,7 +1,7 @@
 # 技术方案
 
 > 技术选型、数据模型、接口契约的权威标准。版本升级需先改本文档再动 package.json。
-> 最后更新：2026-09-28
+> 最后更新：2026-09-29
 
 ## 1. 技术选型（版本固定）
 
@@ -26,6 +26,7 @@
 - package.json 不设 `"type":"module"`：main/preload 走 CommonJS 成熟路径
 - **零原生模块**（无 better-sqlite3 等），持久化用主进程 JSON 文件
 - **渲染层用成熟库、请求侧继续手写**：Markdown 的边界情况（嵌套列表、表格、代码围栏、行内代码与转义）太多，不值得手写，用 react-markdown 这条成熟链路；而请求侧的 SSE 解析只有几十行、格式完全固定，继续手写（见 §7）
+- **卡片只留「一段人设 + 后置词 + 世界书」，不把外部格式的三区结构搬进界面**：面对的是不懂技术的新手，多一个分区就多一层困惑。外部卡的三区（前置词 / 提示词 / 后置词）在**导入时折叠**——前置词与提示词正文合成「角色设定」，后置词单独留字段（它必须待在消息末尾才有效）。详见 §3「卡片的外部格式与导入映射」
 - 开发机需 Node ≥ 22.12
 
 ## 2. 目录结构
@@ -40,7 +41,7 @@ src/
 │  ├─ worldbook.ts          # 世界书注入算法 + 消息组装
 │  ├─ chatClient.ts         # SSE 流式、AbortController 注册表、错误映射、testConnection
 │  ├─ ipc.ts                # 全部 ipcMain.handle 注册 + chat:send 编排
-│  └─ transfer.ts           # 导出/导入（文件对话框、头像 base64 编解码）
+│  └─ transfer.ts           # 导出/导入（自有格式 + Dify 格式识别与映射、头像 base64 往返、导入报告）
 ├─ preload/index.ts         # contextBridge 暴露 window.api
 └─ renderer/
    ├─ index.html            # CSP（仅生产构建注入）
@@ -67,7 +68,8 @@ interface WorldbookEntry {
 interface Card {
   id: string; name: string
   avatar?: string      // 头像文件名 "<cardId>.<随机后缀>.<ext>"；无 = 占位
-  systemPrompt: string
+  systemPrompt: string // 角色设定（人设）。导入外部卡片时，前置词与提示词正文都折进这里（见「卡片的外部格式与导入映射」）
+  suffix: string       // 后置词，'' = 无。非空时作为**最后一条消息**发送，见 §6
   greeting: string     // 开场白，'' = 无
   worldbook: WorldbookEntry[]
   model?: string       // 可选：该卡指定的模型；空/缺省 = 用设置里的默认模型
@@ -121,6 +123,69 @@ interface Provider {
 - 地址是空串时拒绝保存（中文报错）
 - **旧数据迁移**：首次读取时若 providers.json 不存在，且 settings.json 里有 baseUrl/model，则自动生成第一条供应商（apiKey 一并带过来）并把 `currentProviderId` 指向它；settings.json 里残留的 baseUrl/apiKey/model/providerKeys 字段只用于这次迁移，此后读取忽略、下次保存设置时自然消失
 - 删除当前使用中的供应商时，`currentProviderId` 落到剩余第一条；一条都不剩则为 `''`
+
+### 卡片的外部格式与导入映射（`main/transfer.ts`）
+
+**导出格式**（自有格式，文件可读、可手改）：
+
+```jsonc
+{
+  "format": "ai-chat-cards",  // 格式标识，导入时据此识别
+  "version": 1,
+  "card": { /* Card 的全部字段；这里的 id 无意义，导入时会重新分配 */ },
+  "avatarDataUrl": "data:image/png;base64,..."  // 可选；无头像则整个字段缺省
+}
+```
+
+- 导出**不含对话记录**：对话是本地过程产物，不随卡走
+- 导入时**重新分配 `card.id`**（与「建分支」同规矩：世界书条目的 id 也要换新），避免覆盖已有卡；**卡片名称允许重复**——新手很可能把同一张卡导两遍，不该报错
+- 头像文件名带随机后缀（见 §5），重复导入不会互相覆盖
+
+**兼容格式：Dify 的 app 配置**（根对象或 `data` 下有 `model_config` 对象即认定）。字段映射：
+
+| 外部字段 | 本地字段 | 说明 |
+|---|---|---|
+| `apps.name` / `name` | `name` | |
+| `apps.icon`（http 地址） | `avatar` | 导入时下载存本地（超时 10 秒、>5MB 放弃）；失败留空并写进报告 |
+| `model_config.opening_statement` | `greeting` | |
+| `model_config.pre_prompt`（前置词） | `systemPrompt` | 按顺序与提示词正文拼接 |
+| `model_config.chat_prompt_config`（**JSON 字符串**，块数组） | `systemPrompt` | 逐块取 `text` 顺序拼接；块上的 `role` 不保留 |
+| `model_config.completion_prompt_config`（**JSON 字符串**） | `systemPrompt` / `suffix` | `prompt.text` 接进人设；`post_prompt` → 后置词 |
+| `model_config.world_book`（**整段文本**） | `worldbook` | **整段作为一条"常驻"条目**（标题「世界书」）——外部格式的世界书是一段文本，不是条目数组，不要试图按关键词切条 |
+| `model_config.model.name` | `model` | |
+| `apps.description` / `tags` / `author` 等展示字段 | — | 不导入（不属于聊天数据），在报告里说明已忽略 |
+
+**三条硬规矩**：
+
+1. **不把三区结构暴露到界面上**。目标用户是不懂技术的新手，看到「前置词 / 提示词 / 后置词」只会困惑。导入时前置词与提示词正文折成一段「角色设定」，**只有后置词单独留字段**——它必须待在消息序列的最后才有效，折进人设就失效（见 §6）。
+2. **不认识的字段一律进「导入报告」，绝不静默丢弃**。有些平台在导出时会**把提示词正文挖空、只留下长度字段**（如 `pre_length`、`world_book_length`）——报告必须直说「这张卡的提示词在文件里是空的」，否则用户会以为是本应用弄丢了。
+3. **只处理用户选中的文件**：不联网抓取卡片、不调任何站点的接口、不做批量下载（需求见 requirements §6）。
+
+**暂不支持**（同样进报告说明，不做静默处理）：
+
+- Dify 的 **DSL YAML** 导出（`kind: app`）——解析 YAML 要引依赖，与「零依赖」原则冲突
+- `conversation_histories_role` 的 `user_prefix` / `assistant_prefix`（给每条历史消息包前后缀）——本地按消息数组发送，没有对应位置
+- `model_config.model.completion_params` 的卡级采样参数（温度 / top_p 等，见 requirements §6）
+
+**导入报告**（`import:cards` 的返回，界面据此显示结果）：
+
+```ts
+interface ImportReport {
+  fileName: string
+  ok: boolean
+  kind: 'own' | 'dify' | 'unknown'  // 识别出的格式
+  cardId?: string                   // ok 时：新卡的 id
+  cardName?: string
+  summary?: {                       // ok 时：装进来了什么
+    promptChars: number             // 角色设定字数；**0 = 文件里本来就是空的**
+    suffixChars: number
+    worldbookEntries: number
+    hasGreeting: boolean
+  }
+  warnings: string[]                // 灰色小字逐条列出：被挖空的正文、不认识的字段、头像下载失败…
+  error?: string                    // 失败原因（中文）
+}
+```
 
 ### 可用模型列表的获取（`main/chatClient.ts` → `listModels(provider)`）
 
@@ -209,8 +274,8 @@ ai-chat-cards/
 | `app:copy-text` | text → void | 主进程 `clipboard.writeText`（理由见 §3 消息级操作一节） |
 | `chat:send` | (cardId, convId, text) → {ok} | 立即返回，流式经推送事件 |
 | `chat:abort` | (cardId, convId) → void | 中止 fetch，半截文本已持久化 |
-| `export:card` | cardId → {path\|null} | 保存对话框，默认名 <卡名>.json |
-| `import:cards` | — → {imported} | 打开对话框多选 |
+| `export:card` | cardId → {path\|null} | 保存对话框，默认名 `<卡名>.json`（卡名里的非法文件名字符先替换成 `_`）；写自有格式（含头像 base64，见 §3「卡片的外部格式与导入映射」）。用户取消返回 `null` |
+| `import:cards` | — → ImportReport[] | 打开对话框**多选** JSON；逐个识别格式（自有 / Dify / 认不出）并转换落盘；**一张失败不影响其余**。返回每张一张报告（结构见 §3），界面据此显示导入结果。**不抛异常**（失败写在报告的 `error` 里） |
 
 ### 推送频道（main → renderer，`chat:event`）
 
@@ -240,15 +305,18 @@ type ChatEvent =
 2. 编辑器只把新文件名暂存在内存；点「保存」时 cards:save 对比记录中的旧文件名，不同才删旧文件。取消编辑 → 新文件成为孤儿，下次启动自动清理
 3. 显示：自定义协议 `app-media://`（注册为 privileged+standard），`protocol.handle` 内做路径穿越防护（resolve 后必须仍在 avatarDir 内），`net.fetch(pathToFileURL(...))` 返回；渲染层 `<img src="app-media://local/avatars/xxx.png">`，开发（http 源）与打包（file 源）下行为一致；文件名含随机后缀，天然免疫浏览器缓存（换图无需加时间戳）
 4. 无头像：色块 + 名字首字，颜色 = 8 色调色板按 card.id 哈希取模
-5. 导出：头像读为 `avatarDataUrl`（data:image/...;base64）写入 JSON；导入：解码回 avatars/ 目录，失败回退占位
+5. 导出：头像读为 `avatarDataUrl`（data:image/...;base64）写入 JSON；导入：解码回 avatars/ 目录，失败回退占位并写进导入报告
+6. **外部卡的头像是 http 地址时**：先下载（超时 10 秒、超 5MB 放弃）再走上面同一条路；失败则留空用占位，并写进报告。这是导入过程里**唯一的联网动作**，且只针对用户选中的文件里写着的地址
 
 ## 6. 世界书注入算法（纯函数，main/worldbook.ts）
 
 1. **扫描窗口**：最近 8 条消息 + 当前用户消息，拼接转小写
 2. **匹配**：条目激活 = `alwaysOn` 或任一关键词为窗口子串（关键词 trim + 小写，空关键词忽略）
 3. **排序**：激活条目按 `order` 升序（平局按标题），常驻与触发条目同一规则，按 id 去重
-4. **注入**：`[世界书条目]\n# 标题\n内容...` 拼块，与系统提示词合并为**首条 system 消息**：`块 + '\n\n' + systemPrompt`；之后是完整对话历史；最后是当前用户消息
-5. **`buildMessages(card, history, currentText?)`**：`currentText` **可省略**——「重新输出」是让 AI 对已有的历史重答一遍，没有新的用户输入，不该凭空追加一条 user 消息（省略时扫描窗口就只用 history）
+4. **注入**：`[世界书条目]\n# 标题\n内容...` 拼块，与角色设定合并为**首条 system 消息**：`块 + '\n\n' + systemPrompt`；之后是完整对话历史；然后是当前用户消息
+5. **后置词**（`card.suffix` 去空白后非空时）：作为**最后一条 system 消息**追加在用户消息之后。它必须待在消息序列的**末尾**才有效——很多卡用它约束输出格式（"只输出 JSON""不要旁白"这类），折进人设里就不灵了。为空则**一条都不加**，不留空消息
+   - 首条 system 与末条 system 的分工：**开头管"你是谁"，结尾管"这条回复该怎么写"**
+6. **`buildMessages(card, history, currentText?)`**：`currentText` **可省略**——「重新输出」是让 AI 对已有的历史重答一遍，没有新的用户输入，不该凭空追加一条 user 消息（省略时扫描窗口就只用 history；此时后置词仍照常追加在末尾）
 
 ## 7. 聊天请求（流式 / 非流式，main/chatClient.ts）
 
