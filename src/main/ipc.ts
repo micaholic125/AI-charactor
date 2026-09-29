@@ -17,6 +17,7 @@ import type {
   Settings
 } from '@shared/types'
 import { IPC } from '@shared/types'
+import { exportCard, importCards } from './transfer'
 import {
   branchConversation,
   copyAvatarFile,
@@ -149,6 +150,13 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.copyText, async (_e, text: string) => {
     await clipboard.writeText(String(text ?? ''))
   })
+
+  // 导入 / 导出（规范见 docs/tech.md §3「卡片的外部格式与导入映射」）
+  ipcMain.handle(IPC.exportCard, (e, cardId: string) =>
+    exportCard(BrowserWindow.fromWebContents(e.sender), cardId)
+  )
+  // 不抛异常：每张卡的结果（含失败原因）都写在报告里，一张失败不影响其余
+  ipcMain.handle(IPC.importCards, (e) => importCards(BrowserWindow.fromWebContents(e.sender)))
 
   // 聊天
   ipcMain.handle(IPC.chatSend, (e, cardId: string, convId: string, text: string) =>

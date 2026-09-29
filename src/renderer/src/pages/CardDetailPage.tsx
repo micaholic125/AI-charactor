@@ -5,7 +5,7 @@ import { useAppStore } from '../store/appStore'
 import { relativeTime } from '../utils/format'
 import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
-import { ArrowLeftIcon, ChatIcon, EditIcon, PlusIcon, TrashIcon } from '../components/icons'
+import { ArrowLeftIcon, ChatIcon, EditIcon, ExportIcon, PlusIcon, TrashIcon } from '../components/icons'
 
 interface Props {
   cardId: string
@@ -21,6 +21,7 @@ export default function CardDetailPage({ cardId }: Props) {
   const [convs, setConvs] = useState<ConvSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [exporting, setExporting] = useState(false)
   /** 正在行内重命名的对话 */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
 
@@ -49,6 +50,20 @@ export default function CardDetailPage({ cardId }: Props) {
       toast(err instanceof Error ? err.message : '新建对话失败', 'error')
     } finally {
       setCreating(false)
+    }
+  }
+
+  /** 导出：弹保存对话框，写一个 JSON 文件（含头像）。用户取消就静默返回，不提示 */
+  const handleExport = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const { path } = await window.api.io.exportCard(cardId)
+      if (path !== null) toast('已导出')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : '导出失败', 'error')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -107,6 +122,14 @@ export default function CardDetailPage({ cardId }: Props) {
         </button>
         <Avatar card={card} size={40} radius={12} />
         <h1 className="page-title">{card.name}</h1>
+        <button
+          className="icon-btn"
+          title="导出这张卡（存成文件，可以发给别人）"
+          onClick={() => void handleExport()}
+          disabled={exporting}
+        >
+          <ExportIcon size={20} />
+        </button>
         <button
           className="icon-btn"
           title="编辑聊天卡"

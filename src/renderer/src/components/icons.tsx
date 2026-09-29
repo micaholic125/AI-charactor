@@ -245,6 +245,28 @@ export function UndoIcon(props: IconProps) {
   )
 }
 
+/** 导入（箭头落进托盘） */
+export function ImportIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3.5v10" />
+      <path d="M8 9.5l4 4 4-4" />
+      <path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3" />
+    </Icon>
+  )
+}
+
+/** 导出（箭头从托盘升起） */
+export function ExportIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 13.5v-10" />
+      <path d="M8 7.5l4-4 4 4" />
+      <path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3" />
+    </Icon>
+  )
+}
+
 /** 调节参数（三条横线，各带一个滑块） */
 export function SlidersIcon(props: IconProps) {
   return (

@@ -18,7 +18,8 @@ export interface Card {
   id: string
   name: string
   avatar?: string // 头像文件名 "<cardId>.<随机后缀>.<ext>"；无 = 占位
-  systemPrompt: string
+  systemPrompt: string // 角色设定（人设）。导入外部卡时，前置词与提示词正文都折进这里（见 tech.md §3）
+  suffix: string // 后置词，'' = 无。非空时作为**最后一条消息**发送，见 tech.md §6
   greeting: string // 开场白，'' = 无
   worldbook: WorldbookEntry[]
   model?: string // 可选：该卡指定的模型；空/缺省 = 用设置里的默认模型
@@ -176,6 +177,43 @@ export interface FetchModelsResult {
   detail?: string
 }
 
+/**
+ * 导入报告：`import:cards` 的返回，界面据此显示「装进来了什么 / 有什么没装进来」。
+ * 规范见 docs/tech.md §3「卡片的外部格式与导入映射」。
+ */
+export interface ImportReport {
+  fileName: string
+  ok: boolean
+  /** 识别出的格式：自有格式 / Dify 格式 / 认不出 */
+  kind: 'own' | 'dify' | 'unknown'
+  /** ok 时：新卡的 id（报告里那个「去编辑」按钮靠它跳转到编辑页） */
+  cardId?: string
+  cardName?: string
+  /** ok 时：装进来了什么 */
+  summary?: {
+    /** 角色设定字数；**0 = 文件里本来就是空的**，不是本应用弄丢了 */
+    promptChars: number
+    suffixChars: number
+    worldbookEntries: number
+    hasGreeting: boolean
+  }
+  /** 灰色小字逐条列出：被挖空的正文、不认识的字段、头像下载失败… */
+  warnings: string[]
+  /** 失败原因（中文）；ok 时缺省 */
+  error?: string
+}
+
+/** 导出文件的结构（自有格式，文件可读、可手改） */
+export interface ExportedCard {
+  /** 格式标识，导入时据此识别 */
+  format: 'ai-chat-cards'
+  version: number
+  /** 卡片全部字段；这里的 id 无意义，导入时会重新分配 */
+  card: Card
+  /** 可选；无头像则整个字段缺省 */
+  avatarDataUrl?: string
+}
+
 /** preload 实现与渲染层类型共用此接口，防止两边走样 */
 export interface Api {
   cards: {
@@ -258,6 +296,15 @@ export interface Api {
     /** 订阅流式事件，返回取消订阅函数 */
     onEvent(cb: (ev: ChatEvent) => void): () => void
   }
+  io: {
+    /** 导出这张卡：弹保存对话框。用户取消时 `path` 为 null */
+    exportCard(cardId: string): Promise<{ path: string | null }>
+    /**
+     * 导入：弹文件对话框（**可多选**），逐个识别格式并转换落盘，
+     * **一张失败不影响其余**。**不抛异常**——失败写在报告的 `error` 里。
+     */
+    importCards(): Promise<ImportReport[]>
+  }
   /** 复制到系统剪贴板。走主进程而不是 navigator.clipboard：后者依赖文档焦点，会偶发不生效 */
   copyText(text: string): Promise<void>
 }
@@ -317,6 +364,7 @@ export function createSampleCard(): Card {
     systemPrompt:
       '你是小暖，一个温柔耐心的生活助手。你说话亲切自然，总是先倾听再回应。\n' +
       '不要暴露自己是 AI；不要说"作为 AI 模型"之类的话。',
+    suffix: '',
     greeting: '你好呀，我是小暖！今天想聊点什么？',
     worldbook: [
       {

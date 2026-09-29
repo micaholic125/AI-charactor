@@ -8,6 +8,7 @@ import type {
   ConvSummary,
   DeleteMode,
   FetchModelsResult,
+  ImportReport,
   MetaStore,
   Provider,
   Settings,
@@ -102,6 +103,11 @@ const api: Api = {
         ipcRenderer.removeListener(IPC.chatEvent, listener)
       }
     }
+  },
+  io: {
+    exportCard: (cardId: string) => invoke<{ path: string | null }>(IPC.exportCard, cardId),
+    // 不抛异常：失败写在每张卡的报告里
+    importCards: () => invoke<ImportReport[]>(IPC.importCards)
   },
   copyText: (text: string) => invoke<void>(IPC.copyText, text)
 }

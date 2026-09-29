@@ -120,6 +120,9 @@ export async function ensureStore(): Promise<void> {
 
   try {
     cards = await readJson<Card[]>(cardsFile())
+    // 旧数据兼容：老卡片没有 suffix 字段 → 读时补齐为 ''。
+    // 沿用「读时补齐、下次写才落盘」，不主动改写用户文件
+    cards = cards.map((c) => ({ ...c, suffix: c.suffix ?? '' }))
   } catch {
     try {
       await fs.rename(cardsFile(), `${cardsFile()}.bak`)
@@ -186,6 +189,8 @@ export async function saveCard(input: Card): Promise<Card> {
     // 头像字段只接受纯文件名（防路径穿越），非法值一律当无头像
     avatar: input.avatar && isSafeAvatarName(input.avatar) ? input.avatar : undefined,
     worldbook: input.worldbook ?? [],
+    // 后置词：'' = 无（发请求时不追加任何消息）
+    suffix: (input.suffix ?? '').trim(),
     // 模型：空串一律存成缺省（发请求时回退到设置里的默认模型）
     model: (input.model ?? '').trim() || undefined,
     // 输出方式：只有真正的布尔才存（缺省 = 跟随设置）
@@ -248,6 +253,17 @@ export async function deleteAvatarFile(name: string): Promise<void> {
 export async function copyAvatarFile(cardId: string, srcPath: string, ext: string): Promise<string> {
   const name = `${cardId}.${randomBytes(4).toString('hex')}.${ext}`
   await fs.copyFile(srcPath, join(avatarsDir, name))
+  return name
+}
+
+/** 把一段二进制写成这张卡的头像（导入时用：base64 解码、或下载来的外部图标） */
+export async function writeAvatarFile(
+  cardId: string,
+  data: Uint8Array,
+  ext: string
+): Promise<string> {
+  const name = `${cardId}.${randomBytes(4).toString('hex')}.${ext}`
+  await fs.writeFile(join(avatarsDir, name), data)
   return name
 }
 

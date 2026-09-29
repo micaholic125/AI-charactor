@@ -54,7 +54,7 @@ export function buildWorldbookBlock(entries: WorldbookEntry[]): string {
 /**
  * 组装完整请求消息：
  * 首条 system =「世界书块 + 空行 + 角色设定」（任一为空则只留另一个），
- * 之后是全部历史消息，最后是当前用户消息。
+ * 之后是全部历史消息、当前用户消息，**最后是后置词**（非空时）。
  *
  * `currentText` 可以省略：**重新输出**时没有新的用户输入，历史本身就是全部内容，
  * 硬塞一条空的 user 消息会让 AI 以为用户说了句空话。见 docs/tech.md §6。
@@ -75,5 +75,11 @@ export function buildMessages(
     if (m && m.content) messages.push({ role: m.role, content: m.content })
   }
   if (text.trim() !== '') messages.push({ role: 'user', content: text })
+
+  // 后置词：非空时作为**最后一条** system 消息。它必须紧贴 AI 要回复的位置才有效，
+  // 折进最前面那条 system 就失效了——这是它单独留字段的理由（见 docs/tech.md §6）
+  const suffix = (card.suffix ?? '').trim()
+  if (suffix !== '') messages.push({ role: 'system', content: suffix })
+
   return messages
 }

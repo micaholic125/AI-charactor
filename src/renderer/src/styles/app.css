@@ -501,6 +501,33 @@ ul {
   color: var(--danger);
 }
 
+/* 可折叠字段（卡片编辑页的「后置词」）：标题行本身是按钮，点一下展开/收起 */
+.field-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-collapse:hover .field-label {
+  color: var(--text);
+}
+
+.field-collapse-arrow {
+  flex-shrink: 0;
+  color: var(--text-2);
+  transition: transform 0.15s;
+}
+
+.field-collapse-arrow.open {
+  transform: rotate(180deg);
+}
+
 .switch-row {
   display: flex;
   align-items: center;
@@ -1327,6 +1354,69 @@ ul {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* ---------- 导入报告弹窗 ---------- */
+
+.import-report-head {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* 多张卡时面板内滚动（.modal-body 本身已可滚动，这里只管排列） */
+.import-report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-report-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.import-report-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.import-report-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.import-report-name {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 失败的卡用危险色显示 */
+.import-report-name.bad,
+.import-report-sum.bad {
+  color: var(--danger);
+}
+
+.import-report-sum {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* 警告逐条列出，灰色小字 */
+.import-report-warn {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-2);
 }
 
 /* 点面板外任意处关闭：全屏透明遮罩，压在面板下方 */
