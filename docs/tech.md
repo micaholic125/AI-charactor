@@ -19,6 +19,7 @@
 | electron-builder | 26.15.3 | 打包 NSIS 安装包 + 便携版 |
 | typescript | 5.9.3 | 不用 7.0（全新原生编译器，工具链风险） |
 | @types/react / @types/node | 19.2.18 / 26.4.1 | 仅类型 |
+| @types/react-dom | ^19.0.0（实际装上 19.2.7） | 仅类型（`main.tsx` 用 `react-dom/client`）。**全项目唯一没锁精确版本的一个**——其余 14 个都是精确版本；实际装的版本由 package-lock.json 钉住，`npm ci` 仍可复现。要改成精确锁，先改本行再动 package.json |
 
 **关键决策**：
 - **导航用 zustand 状态机，不用 react-router**：底部 Tab + 返回栈，桌面应用无需 URL
