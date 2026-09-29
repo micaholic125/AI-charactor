@@ -177,7 +177,7 @@ interface ImportReport {
   fileName: string
   ok: boolean
   kind: 'own' | 'dify' | 'unknown'  // 识别出的格式
-  cardId?: string                   // ok 时：新卡的 id
+  cardId?: string                   // ok 时：新卡的 id（报告里那个「去编辑」按钮靠它跳转到编辑页）
   cardName?: string
   summary?: {                       // ok 时：装进来了什么
     promptChars: number             // 角色设定字数；**0 = 文件里本来就是空的**
