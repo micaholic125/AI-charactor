@@ -69,7 +69,8 @@ interface WorldbookEntry {
 interface Card {
   id: string; name: string
   avatar?: string      // 头像文件名 "<cardId>.<随机后缀>.<ext>"；无 = 占位
-  systemPrompt: string // 角色设定（人设）。导入外部卡片时，前置词与提示词正文都折进这里（见「卡片的外部格式与导入映射」）
+  systemPrompt: string // 角色设定（提示词正文），'' = 无
+  prePrompt: string    // 前置词，'' = 无。与正文同属人设，只是分两段写；拼接顺序见 §6
   suffix: string       // 后置词，'' = 无。非空时作为**最后一条消息**发送，见 §6
   greeting: string     // 开场白，'' = 无
   worldbook: WorldbookEntry[]
@@ -151,8 +152,8 @@ interface Provider {
 | `apps.name` / `name` | `name` | |
 | `apps.icon`（http 地址） | `avatar` | 导入时下载存本地（超时 10 秒、>5MB 放弃）；失败留空并写进报告 |
 | `model_config.opening_statement` | `greeting` | |
-| `model_config.pre_prompt`（前置词） | `systemPrompt` | 按顺序与提示词正文拼接 |
-| `model_config.chat_prompt_config`（**JSON 字符串**，块数组） | `systemPrompt` | 逐块取 `text` 顺序拼接；块上的 `role` 不保留 |
+| `model_config.pre_prompt`（前置词） | `prePrompt` | **单独一个字段**，不折进正文（见下方硬规矩 ①） |
+| `model_config.chat_prompt_config`（**JSON 字符串**） | `systemPrompt` | 逐块取 `text` 顺序拼接；块上的 `role` 不保留。**两种形状都要认**：`{"prompt":[…]}` 与裸数组 `[…]`——只认一种会把正文整段静默丢掉 |
 | `model_config.completion_prompt_config`（**JSON 字符串**） | `systemPrompt` / `suffix` | `prompt.text` 接进人设；`post_prompt` → 后置词 |
 | `model_config.world_book`（**整段文本**） | `worldbook` | **整段作为一条"常驻"条目**（标题「世界书」）——外部格式的世界书是一段文本，不是条目数组，不要试图按关键词切条 |
 | `model_config.model.name` | `model` | |
@@ -160,7 +161,7 @@ interface Provider {
 
 **三条硬规矩**：
 
-1. **不把三区结构暴露到界面上**。目标用户是不懂技术的新手，看到「前置词 / 提示词 / 后置词」只会困惑。导入时前置词与提示词正文折成一段「角色设定」，**只有后置词单独留字段**——它必须待在消息序列的最后才有效，折进人设就失效（见 §6）。
+1. **前置词、正文、后置词各有各的位置，不能一锅端**。前置词与正文**分两段存**（合并成一段会丢掉分段意图，也不方便单独改其中一段——2026-09-29 用户反馈「角色设定太笼统」后调整）；后置词必须待在消息序列的最后才有效，折进人设就失效（见 §6）。两个额外字段在编辑页都**默认折叠**——新手只看到「角色设定」一个框就够用，需要的人自己展开。
 2. **不认识的字段一律进「导入报告」，绝不静默丢弃**。有些平台在导出时会**把提示词正文挖空、只留下长度字段**（如 `pre_length`、`world_book_length`）——报告必须直说「这张卡的提示词在文件里是空的」，否则用户会以为是本应用弄丢了。
 3. **只处理用户选中的文件**：不联网抓取卡片、不调任何站点的接口、不做批量下载（需求见 requirements §6）。
 
@@ -181,6 +182,7 @@ interface ImportReport {
   cardName?: string
   summary?: {                       // ok 时：装进来了什么
     promptChars: number             // 角色设定字数；**0 = 文件里本来就是空的**
+    prePromptChars: number
     suffixChars: number
     worldbookEntries: number
     hasGreeting: boolean
@@ -316,7 +318,8 @@ type ChatEvent =
 1. **扫描窗口**：最近 8 条消息 + 当前用户消息，拼接转小写
 2. **匹配**：条目激活 = `alwaysOn` 或任一关键词为窗口子串（关键词 trim + 小写，空关键词忽略）
 3. **排序**：激活条目按 `order` 升序（平局按标题），常驻与触发条目同一规则，按 id 去重
-4. **注入**：`[世界书条目]\n# 标题\n内容...` 拼块，与角色设定合并为**首条 system 消息**：`块 + '\n\n' + systemPrompt`；之后是完整对话历史；然后是当前用户消息
+4. **注入**：`[世界书条目]\n# 标题\n内容...` 拼块，与**前置词**、**角色设定（正文）**合并为**首条 system 消息**，顺序固定为 `世界书块 + '\n\n' + prePrompt + '\n\n' + systemPrompt`（任一为空则跳过那一段）；之后是完整对话历史；然后是当前用户消息
+   - 前置词排在正文**前面**：它是「角色是谁」的总纲，正文是展开；顺序反了读起来会别扭
 5. **后置词**（`card.suffix` 去空白后非空时）：作为**最后一条 system 消息**追加在用户消息之后。它必须待在消息序列的**末尾**才有效——很多卡用它约束输出格式（"只输出 JSON""不要旁白"这类），折进人设里就不灵了。为空则**一条都不加**，不留空消息
    - 首条 system 与末条 system 的分工：**开头管"你是谁"，结尾管"这条回复该怎么写"**
 6. **`buildMessages(card, history, currentText?)`**：`currentText` **可省略**——「重新输出」是让 AI 对已有的历史重答一遍，没有新的用户输入，不该凭空追加一条 user 消息（省略时扫描窗口就只用 history；此时后置词仍照常追加在末尾）

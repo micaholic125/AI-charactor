@@ -120,9 +120,9 @@ export async function ensureStore(): Promise<void> {
 
   try {
     cards = await readJson<Card[]>(cardsFile())
-    // 旧数据兼容：老卡片没有 suffix 字段 → 读时补齐为 ''。
+    // 旧数据兼容：老卡片没有 suffix / prePrompt 字段 → 读时补齐为 ''。
     // 沿用「读时补齐、下次写才落盘」，不主动改写用户文件
-    cards = cards.map((c) => ({ ...c, suffix: c.suffix ?? '' }))
+    cards = cards.map((c) => ({ ...c, suffix: c.suffix ?? '', prePrompt: c.prePrompt ?? '' }))
   } catch {
     try {
       await fs.rename(cardsFile(), `${cardsFile()}.bak`)
@@ -189,6 +189,8 @@ export async function saveCard(input: Card): Promise<Card> {
     // 头像字段只接受纯文件名（防路径穿越），非法值一律当无头像
     avatar: input.avatar && isSafeAvatarName(input.avatar) ? input.avatar : undefined,
     worldbook: input.worldbook ?? [],
+    // 前置词：'' = 无（发请求时不拼进首条 system）
+    prePrompt: (input.prePrompt ?? '').trim(),
     // 后置词：'' = 无（发请求时不追加任何消息）
     suffix: (input.suffix ?? '').trim(),
     // 模型：空串一律存成缺省（发请求时回退到设置里的默认模型）

@@ -184,6 +184,7 @@ function buildImportedCard(raw: Partial<Card>, newId: string): Card {
     id: newId,
     name: str(raw.name).trim() || '未命名卡片',
     systemPrompt: str(raw.systemPrompt),
+    prePrompt: str(raw.prePrompt).trim(),
     suffix: str(raw.suffix).trim(),
     greeting: str(raw.greeting),
     worldbook: entries.map((e) => ({
@@ -207,6 +208,7 @@ function buildImportedCard(raw: Partial<Card>, newId: string): Card {
 function summarize(card: Card): ImportReport['summary'] {
   return {
     promptChars: card.systemPrompt.trim().length,
+    prePromptChars: card.prePrompt.trim().length,
     suffixChars: card.suffix.trim().length,
     worldbookEntries: card.worldbook.length,
     hasGreeting: card.greeting.trim() !== ''
@@ -236,11 +238,11 @@ async function importDifyFormat(fileName: string, dify: DifyConfig): Promise<Imp
   const apps = dify.apps
   const warnings: string[] = []
 
-  // --- 人设：前置词 → 提示词正文 → completion 里的 prompt.text，按顺序拼成一段 ---
-  const parts: string[] = []
-  const pre = str(mc.pre_prompt).trim()
-  if (pre !== '') parts.push(pre)
-  for (const text of promptBlocks(mc.chat_prompt_config)) parts.push(text)
+  // --- 前置词：**单独一个字段**，不折进正文（见 docs/tech.md §3 硬规矩 ①）---
+  const prePrompt = str(mc.pre_prompt).trim()
+
+  // --- 正文：chat_prompt_config 的块 + completion 里的 prompt.text，按顺序拼成一段 ---
+  const parts = promptBlocks(mc.chat_prompt_config)
 
   const completion = jsonObject(mc.completion_prompt_config)
   const completionPrompt = isObj(completion?.prompt) ? str(completion.prompt.text).trim() : ''
@@ -267,13 +269,15 @@ async function importDifyFormat(fileName: string, dify: DifyConfig): Promise<Imp
         ]
 
   // --- 被平台挖空的正文：字段是空的，但文件里留了长度记录，必须直说 ---
-  if (systemPrompt === '') {
+  if (systemPrompt === '' && prePrompt === '') {
     const len = num(mc.pre_length) ?? num(mc.pre_prompt_and_pre_post_text_length) ?? 0
     warnings.push(
       len > 0
         ? `这张卡的提示词在文件里是空的（导出它的平台没有下发，原本有 ${len} 字），需要自己补`
         : '这张卡的提示词在文件里是空的，需要自己补'
     )
+  } else if (systemPrompt === '') {
+    warnings.push('这张卡只有前置词、没有提示词正文（正文在文件里是空的），需要自己补')
   }
   if (worldbookText === '') {
     const len = num(mc.world_book_length) ?? 0
@@ -315,6 +319,7 @@ async function importDifyFormat(fileName: string, dify: DifyConfig): Promise<Imp
     {
       name: str(apps.name) || str(mc.name) || stripExt(fileName),
       systemPrompt,
+      prePrompt,
       suffix,
       greeting: str(mc.opening_statement),
       worldbook,
@@ -351,11 +356,21 @@ async function importDifyFormat(fileName: string, dify: DifyConfig): Promise<Imp
   }
 }
 
-/** `chat_prompt_config` 是「JSON 字符串形式的块数组」；逐块取 text 顺序拼接，块上的 role 不保留 */
+/**
+ * `chat_prompt_config` 是「JSON 字符串」，**形状有两种**：`{"prompt":[…]}` 与裸数组 `[…]`。
+ * **两种都要认**——只认一种会把提示词正文**整段静默丢掉**（见 docs/tech.md §3）。
+ * 逐块取 `text` 顺序拼接；块上的 `role` 不保留（本地折成一段，没有对应位置）。
+ */
 function promptBlocks(v: unknown): string[] {
   const parsed = jsonParse(v)
-  if (!Array.isArray(parsed)) return []
-  return parsed.map((b) => (isObj(b) ? str(b.text).trim() : '')).filter((t) => t !== '')
+  const list = Array.isArray(parsed)
+    ? parsed
+    : isObj(parsed) && Array.isArray(parsed.prompt)
+      ? parsed.prompt
+      : []
+  return list
+    .map((b) => (typeof b === 'string' ? b.trim() : isObj(b) ? str(b.text).trim() : ''))
+    .filter((t) => t !== '')
 }
 
 // ---------- 头像下载 ----------

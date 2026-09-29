@@ -18,7 +18,8 @@ export interface Card {
   id: string
   name: string
   avatar?: string // 头像文件名 "<cardId>.<随机后缀>.<ext>"；无 = 占位
-  systemPrompt: string // 角色设定（人设）。导入外部卡时，前置词与提示词正文都折进这里（见 tech.md §3）
+  systemPrompt: string // 角色设定（提示词正文），'' = 无
+  prePrompt: string // 前置词，'' = 无。与正文同属人设，只是分两段写；拼在正文前面，见 tech.md §6
   suffix: string // 后置词，'' = 无。非空时作为**最后一条消息**发送，见 tech.md §6
   greeting: string // 开场白，'' = 无
   worldbook: WorldbookEntry[]
@@ -193,6 +194,7 @@ export interface ImportReport {
   summary?: {
     /** 角色设定字数；**0 = 文件里本来就是空的**，不是本应用弄丢了 */
     promptChars: number
+    prePromptChars: number
     suffixChars: number
     worldbookEntries: number
     hasGreeting: boolean
@@ -364,6 +366,7 @@ export function createSampleCard(): Card {
     systemPrompt:
       '你是小暖，一个温柔耐心的生活助手。你说话亲切自然，总是先倾听再回应。\n' +
       '不要暴露自己是 AI；不要说"作为 AI 模型"之类的话。',
+    prePrompt: '',
     suffix: '',
     greeting: '你好呀，我是小暖！今天想聊点什么？',
     worldbook: [

@@ -22,6 +22,7 @@ function summaryLine(r: ImportReport): string {
   if (!s) return ''
   const parts: string[] = []
   if (s.promptChars > 0) parts.push(`角色设定 ${s.promptChars} 字`)
+  if (s.prePromptChars > 0) parts.push(`前置词 ${s.prePromptChars} 字`)
   if (s.suffixChars > 0) parts.push(`后置词 ${s.suffixChars} 字`)
   if (s.worldbookEntries > 0) parts.push(`世界书 ${s.worldbookEntries} 条`)
   if (s.hasGreeting) parts.push('有开场白')

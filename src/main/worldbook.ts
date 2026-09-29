@@ -66,8 +66,11 @@ export function buildMessages(
 ): WireMessage[] {
   const text = currentText ?? ''
   const block = buildWorldbookBlock(pickActiveEntries(card.worldbook, history, text))
+  // 顺序固定：世界书块 → 前置词 → 角色设定（正文）。前置词排在前面——
+  // 它是「角色是谁」的总纲，正文是展开，反了读起来别扭
+  const pre = (card.prePrompt ?? '').trim()
   const prompt = (card.systemPrompt ?? '').trim()
-  const system = [block, prompt].filter((s) => s !== '').join('\n\n')
+  const system = [block, pre, prompt].filter((s) => s !== '').join('\n\n')
 
   const messages: WireMessage[] = []
   if (system !== '') messages.push({ role: 'system', content: system })

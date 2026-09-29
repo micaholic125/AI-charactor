@@ -18,12 +18,61 @@ function emptyDraft(): Card {
     id: newId(), // 提前定好 id：头像文件名要用它做前缀
     name: '',
     systemPrompt: '',
+    prePrompt: '',
     suffix: '',
     greeting: '',
     worldbook: [],
     createdAt: 0,
     updatedAt: 0
   }
+}
+
+/**
+ * 可折叠的可选字段（前置词 / 后置词同款）。规范见 docs/design.md §4。
+ * 默认收起——新手只看到「角色设定」一个框就够用；**本来就填过的卡展开**，别把内容藏起来。
+ */
+function OptionalField({
+  label,
+  collapsedHint,
+  expandedHint,
+  placeholder,
+  value,
+  onChange
+}: {
+  label: string
+  collapsedHint: string
+  expandedHint: string
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(() => value.trim() !== '')
+  const filled = value.trim().length
+
+  return (
+    <div className="field">
+      <button type="button" className="field-collapse" onClick={() => setOpen((v) => !v)}>
+        <ChevronDownIcon size={15} className={`field-collapse-arrow${open ? ' open' : ''}`} />
+        <span className="field-label">{label}</span>
+      </button>
+      {open ? (
+        <>
+          <textarea
+            className="field-textarea"
+            rows={3}
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <span className="field-hint">{expandedHint}</span>
+        </>
+      ) : (
+        <span className="field-hint">
+          {filled === 0 ? `${collapsedHint}。点上面展开。` : `已填写 ${filled} 字，点上面展开查看。`}
+        </span>
+      )}
+    </div>
+  )
 }
 
 export default function CardEditorPage({ cardId }: Props) {
@@ -48,8 +97,7 @@ export default function CardEditorPage({ cardId }: Props) {
   )
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  /** 后置词默认折叠（新手不被打扰）；本来就填过的卡展开，别把内容藏起来 */
-  const [suffixOpen, setSuffixOpen] = useState(() => (original?.suffix ?? '').trim() !== '')
+  /** 前置词/后置词由各自的 OptionalField 自己管折叠态（本来就填过的会展开） */
   /** null = 未打开弹窗；{} = 新建；{ entry } = 编辑 */
   const [editing, setEditing] = useState<{ entry?: WorldbookEntry } | null>(null)
   /** 模型下拉的来源：当前使用中那条供应商的可用模型（没获取过时 ModelPicker 会退回兜底清单） */
@@ -225,41 +273,24 @@ export default function CardEditorPage({ cardId }: Props) {
             <span className="field-hint">这段会作为系统提示词发送，越具体角色越稳定。</span>
           </label>
 
-          {/* 后置词：默认折叠——「不懂就空着」。规范见 docs/design.md §4 */}
-          <div className="field">
-            <button
-              type="button"
-              className="field-collapse"
-              onClick={() => setSuffixOpen((v) => !v)}
-            >
-              <ChevronDownIcon
-                size={15}
-                className={`field-collapse-arrow${suffixOpen ? ' open' : ''}`}
-              />
-              <span className="field-label">后置词（可选）</span>
-            </button>
-            {suffixOpen ? (
-              <>
-                <textarea
-                  className="field-textarea"
-                  rows={3}
-                  value={draft.suffix}
-                  placeholder="每次都会紧贴着 AI 要回复的位置发送的一段话，用来约束文风与格式；不懂就空着"
-                  onChange={(e) => patch({ suffix: e.target.value })}
-                />
-                <span className="field-hint">
-                  它紧贴在 AI 要回复的位置发送（整段消息的最后一条），约束输出格式与文风最有效。
-                  别人写的卡常常用到它，导入时会自动填上。
-                </span>
-              </>
-            ) : (
-              <span className="field-hint">
-                {draft.suffix.trim() === ''
-                  ? '不懂就空着——空着不影响任何功能。点上面展开。'
-                  : `已填写 ${draft.suffix.trim().length} 字，点上面展开查看。`}
-              </span>
-            )}
-          </div>
+          {/* 前置词 / 后置词：两个同款的可折叠字段，默认收起——「不懂就空着」。见 docs/design.md §4 */}
+          <OptionalField
+            label="前置词（可选）"
+            collapsedHint="和角色设定同属人设，只是分两段写；不懂就空着"
+            expandedHint="这段会排在角色设定前面一起发送。别人写的卡常常分成前置词和正文两段，导入时会自动填上。"
+            placeholder="排在角色设定前面的一段话；不懂就空着"
+            value={draft.prePrompt}
+            onChange={(v) => patch({ prePrompt: v })}
+          />
+
+          <OptionalField
+            label="后置词（可选）"
+            collapsedHint="贴在 AI 回复前，管输出格式最有效；不懂就空着"
+            expandedHint="这段会作为消息的最后一条发送。别人写的卡常常用到它，导入时会自动填上。"
+            placeholder="紧贴着 AI 要回复的位置发送的一段话，用来约束文风与格式；不懂就空着"
+            value={draft.suffix}
+            onChange={(v) => patch({ suffix: v })}
+          />
 
           <label className="field">
             <span className="field-label">模型（可选）</span>
