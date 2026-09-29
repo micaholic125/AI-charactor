@@ -75,6 +75,8 @@ interface Card {
   worldbook: WorldbookEntry[]
   model?: string       // 可选：该卡指定的模型；空/缺省 = 用设置里的默认模型
   stream?: boolean     // 可选：该卡指定的输出方式；缺省 = 用设置里的默认（聊天页状态条可改）
+  temperature?: number // 可选：该卡指定的温度（0–2）；缺省 = 用设置里的（聊天页「调节参数」面板可改）
+  maxTokens?: number   // 可选：该卡指定的单次回复最大长度（1–131072）；缺省 = 用设置里的（同上）
   createdAt: number; updatedAt: number
 }
 interface ChatMessage {
@@ -166,7 +168,7 @@ interface Provider {
 
 - Dify 的 **DSL YAML** 导出（`kind: app`）——解析 YAML 要引依赖，与「零依赖」原则冲突
 - `conversation_histories_role` 的 `user_prefix` / `assistant_prefix`（给每条历史消息包前后缀）——本地按消息数组发送，没有对应位置
-- `model_config.model.completion_params` 的卡级采样参数（温度 / top_p 等，见 requirements §6）
+- `model_config.model.completion_params` 里**目前还没做卡片级**的那些采样参数（top_p / top_k / 存在惩罚 / 频率惩罚等）：**现阶段导入时忽略**，并在导入报告里说明。它们是「**还没做**」而不是「不做」——卡片级参数会陆续补齐（见 requirements 3.4），届时这些字段一并带过来。**本次已带过来的是** `temperature` → `Card.temperature`、`max_tokens` → `Card.maxTokens`
 
 **导入报告**（`import:cards` 的返回，界面据此显示结果）：
 
@@ -332,6 +334,8 @@ type ChatEvent =
   - 请求 `model` = 卡片的 `card.model`（非空时）否则当前供应商的 `provider.model`；两者都空则报「请先填写模型名称」
   - **卡片不绑定供应商**：`Card` 里只有一个模型名，走哪家永远由全局的 `currentProviderId` 决定。所以聊天页切换供应商时，若这张卡的模型不在新供应商的 `models` 里（且新供应商 `models` 非空），渲染层顺手把 `card.model` 清空（回落到新供应商的默认模型）并提示一句——否则下一条必然是 404
   - 请求 `stream` = 卡片的 `card.stream`（是布尔时）否则设置里的 `settings.stream`。**必须用 `typeof x === 'boolean'` 判断**，不能写 `card.stream ?? default` 之外的 falsy 判断——`false` 是有效值
+  - 请求 `temperature` / `max_tokens` = 卡片的 `card.temperature` / `card.maxTokens`（是数字时）否则设置里的 `settings.temperature` / `settings.maxTokens`。**同样必须用 `typeof x === 'number'` 判断**——`0` 是有效温度，靠真值判断会把「本卡设成 0」错当成「没设」而回落到全局
+  - 四个卡片级参数（`model` / `stream` / `temperature` / `maxTokens`）的归一与校验都在 `cards:save` 里做一处，读出来就能直接用，不在请求时兜底
   - 在 ipc.sendChat 里算好，作为显式参数传给 `requestChat(cardId, convId, provider, model, stream, temperature, maxTokens, messages, onDelta)`
   - `testConnection` 固定用非流式小请求（max_tokens:8），测的是**传进来的那条供应商自己的模型**，不受卡片设置与「接收方式」影响
 - **SSE 解析**：手写（fetch + ReadableStream + TextDecoder，按 `\n\n` 分块、`data:` 行、`[DONE]` 终止、取 `choices[0].delta.content`），零依赖
