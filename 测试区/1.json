@@ -1,0 +1,15 @@
+{
+  "format": "ai-chat-cards",
+  "version": 1,
+  "card": {
+    "id": "c72a4705-dd63-4516-aecb-a3197d7099ba",
+    "name": "1",
+    "systemPrompt": "3",
+    "prePrompt": "4",
+    "suffix": "5",
+    "greeting": "2",
+    "worldbook": [],
+    "createdAt": 1791343387965,
+    "updatedAt": 1791343387965
+  }
+}
