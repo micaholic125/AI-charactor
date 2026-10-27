@@ -1919,3 +1919,178 @@ ul {
   word-break: break-all;
   user-select: text;
 }
+
+/* ---------- 记忆区（阶段 7.1） ---------- */
+
+.chat-memory-btn {
+  position: relative;
+  margin-left: auto;
+}
+
+.chat-memory-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--surface);
+}
+
+.memory-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.memory-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.memory-metric-label {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.memory-metric-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.memory-banner {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.memory-banner-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.memory-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-count {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.memory-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.memory-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memory-text {
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.memory-meta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.memory-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.memory-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.memory-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.memory-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.memory-editor-actions .field-hint {
+  margin-right: auto;
+}
+
+.memory-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-number .field-input {
+  max-width: 120px;
+}
+
+.memory-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+  margin-top: 12px;
+}
+
+.memory-progress {
+  margin-top: 2px;
+  text-align: center;
+}

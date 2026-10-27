@@ -1,7 +1,7 @@
 # 技术方案
 
 > 技术选型、数据模型、接口契约的权威标准。版本升级需先改本文档再动 package.json。
-> 最后更新：2026-09-29
+> 最后更新：2026-10-26
 
 ## 1. 技术选型（版本固定）
 
@@ -35,12 +35,15 @@
 ```
 src/
 ├─ shared/types.ts          # 全部接口/IPC 频道常量/ChatEvent 联合类型/默认值（唯一真源）
+├─ shared/memory.ts         # 记忆纯函数：归一、窗口、容量工具、标记解析（main/renderer 共用）
 ├─ main/
 │  ├─ index.ts              # 窗口(1100×750)、安全开关、app-media:// 协议、退出时保存半截回复
 │  ├─ store.ts              # JSON 持久化层（原子写、每文件写队列、缓存、首次运行示例卡）
 │  ├─ providers.ts          # 供应商配置的读写与迁移（providers.json）
-│  ├─ worldbook.ts          # 世界书注入算法 + 消息组装
-│  ├─ chatClient.ts         # SSE 流式、AbortController 注册表、错误映射、testConnection
+│  ├─ worldbook.ts          # 世界书注入算法 + 消息组装（含记忆窗口与记忆块）
+│  ├─ chatClient.ts         # SSE 流式、AbortController 注册表、错误映射、testConnection、requestCompletion
+│  ├─ memory.ts             # 记忆纯逻辑：标记解析、流式过滤、去重、JSON 容错、提示词模板
+│  ├─ memoryService.ts      # 记忆后台任务：兜底总结、向上沉淀、修正、任务锁与退避
 │  ├─ ipc.ts                # 全部 ipcMain.handle 注册 + chat:send 编排
 │  └─ transfer.ts           # 导出/导入（自有格式 + Dify 格式识别与映射、头像 base64 往返、导入报告）
 ├─ preload/index.ts         # contextBridge 暴露 window.api
@@ -49,7 +52,7 @@ src/
    └─ src/
       ├─ App.tsx            # 视图切换、TabBar、流式事件订阅、Toast/确认弹窗宿主
       ├─ store/appStore.ts + chatStore.ts
-      ├─ pages/ HomePage / MinePage / CardDetailPage / CardEditorPage / ChatPage / SettingsPage
+      ├─ pages/ HomePage / MinePage / CardDetailPage / CardEditorPage / ChatPage / MemoryPage / SettingsPage
       ├─ components/ TabBar / SearchBar / CardItem / Avatar / SegmentedControl / ConfirmDialog / Modal / WorldbookEntryModal / CommonModelsModal / MarkdownText / Toast / icons
       ├─ utils/format.ts    # 相对时间、头像配色哈希、标题截断
       └─ styles/ theme.css（双配色变量）+ app.css
@@ -78,6 +81,13 @@ interface Card {
   stream?: boolean     // 可选：该卡指定的输出方式；缺省 = 用设置里的默认（聊天页状态条可改）
   temperature?: number // 可选：该卡指定的温度（0–2）；缺省 = 用设置里的（聊天页「调节参数」面板可改）
   maxTokens?: number   // 可选：该卡指定的单次回复最大长度（1–131072）；缺省 = 用设置里的（同上）
+  // 记忆设置（见 §9）：全部可选，缺省用 shared/memory.ts 里的默认值
+  memoryEnabled?: boolean    // 缺省 true
+  memoryRecentCount?: number // 「记忆设定」每次带 N 条历史消息，默认 6，2–50
+  memoryShortLimit?: number  // 短期容量（字），默认 3000，200–20000
+  memoryShortBatch?: number  // 短→长的条数阈值，默认 25，3–100
+  memoryLongLimit?: number   // 长期容量（条），默认 20，2–100
+  memoryLongBatch?: number   // 长→永久的条数阈值，默认 10，2–50
   createdAt: number; updatedAt: number
 }
 interface ChatMessage {
@@ -87,11 +97,33 @@ interface ChatMessage {
   ts: number
   editedAt?: number    // 被改过的时间戳；无 = 没改过（界面上挂灰色「已修改」小字）
 }
+type MemoryLayer = 'short' | 'long' | 'permanent'
+interface MemoryEntry {
+  id: string
+  content: string     // 一句话一条；硬上限 300 字
+  source: 'ai' | 'summary' | 'consolidate' | 'user' | 'repair'
+  sourceMessageIds: string[]  // 产生这条记忆的消息 id；分支时过滤「未来信息」；用户手写为 []
+  createdAt: number
+  updatedAt?: number
+}
+interface ConversationMemory {
+  version: 1
+  coveredCount: number        // messages[0..coveredCount) 的原文已被记忆接住
+  short: MemoryEntry[]
+  long: MemoryEntry[]
+  permanent: MemoryEntry[]
+  revision: number            // 每次记忆变更 +1，用于乐观并发
+  lastRunAt?: number
+  lastError?: string          // 最近一次自动整理失败的中文原因；成功后清空
+  failCount: number
+  retryAfter?: number         // 退避截止时间戳；未到点不自动重试
+}
 interface Conversation {
   id: string; cardId: string
   title: string        // 自动取首条用户消息前20字，否则"新对话"
   createdAt: number; updatedAt: number
   messages: ChatMessage[]
+  memory?: ConversationMemory  // 缺省 = 空记忆、coveredCount 0（老对话读取时补齐，不主动改写文件）
   branchFrom?: { convId: string; title: string }  // 分支来源（标题 + 原对话 id），对话列表里显示「分支自 xxx」
 }
 interface MetaStore {
@@ -128,6 +160,21 @@ interface Provider {
 - **旧数据迁移**：首次读取时若 providers.json 不存在，且 settings.json 里有 baseUrl/model，则自动生成第一条供应商（apiKey 一并带过来）并把 `currentProviderId` 指向它；settings.json 里残留的 baseUrl/apiKey/model/providerKeys 字段只用于这次迁移，此后读取忽略、下次保存设置时自然消失
 - 删除当前使用中的供应商时，`currentProviderId` 落到剩余第一条；一条都不剩则为 `''`
 
+### 记忆的归属、默认值与计数口径（`shared/memory.ts`）
+
+- **按对话保存**：`Conversation.memory` 嵌在对话文件里，删除对话即随之删除；同一张卡的多个对话各存各的
+- **默认值**（卡片级字段缺省时使用，全部可在卡片编辑页改）：
+  - `memoryRecentCount` 6（2–50）：每次请求带最近 N 条历史消息
+  - `memoryShortLimit` 3000（200–20000）：短期容量，按**字符数**
+  - `memoryShortBatch` 25（3–100）：短→长的条数阈值
+  - `memoryLongLimit` 20（2–100）：长期容量，按**条数**
+  - `memoryLongBatch` 10（2–50）：长→永久的条数阈值
+- **计数口径**：短期按字符数；长期、永久按条数；窗口按消息条数。都不是 token 精确值，界面注明「约」
+- **单条上限**：所有记忆条目硬上限 **300 字**，超长截断加省略号
+- **旧数据兼容**：老对话没有 `memory` → 读时补 `{ version:1, coveredCount:0, short:[], long:[], permanent:[], revision:0, failCount:0 }`，**不主动改写文件**；老卡片没有五个字段 → 按默认值处理。沿用「读时补齐、下次写才落盘」
+- **归一与校验**：五个数字的合法性集中在一处（`resolveMemoryConfig` + `cards:save`），越界/垃圾值一律当「没设」回落到默认，不报错
+- `coveredCount` 表示「前多少条消息已经写进记忆」，读取时一律 clamp 到 `messages.length`
+
 ### 卡片的外部格式与导入映射（`main/transfer.ts`）
 
 **导出格式**（自有格式，文件可读、可手改）：
@@ -142,6 +189,7 @@ interface Provider {
 ```
 
 - 导出**不含对话记录**：对话是本地过程产物，不随卡走
+- **卡片级记忆设置随 `Card` 一起导出/导入**（`memoryEnabled` 等五个字段）；**对话与三层记忆本身不导出**（它们属于对话，不属于卡片）
 - 导入时**重新分配 `card.id`**（与「建分支」同规矩：世界书条目的 id 也要换新），避免覆盖已有卡；**卡片名称允许重复**——新手很可能把同一张卡导两遍，不该报错
 - 头像文件名带随机后缀（见 §5），重复导入不会互相覆盖
 
@@ -275,26 +323,41 @@ ai-chat-cards/
 | `convs:update-message` | (cardId, convId, messageId, content, dropAfter) → Conversation | 改一条消息的文字。`content` 去空白后不能为空；`dropAfter` = 连同这条之后的一起截掉。**不发起请求** |
 | `convs:delete-message` | (cardId, convId, messageId, mode) → Conversation | `mode`：`'only'` / `'reply-too'`（这条 + 紧随的 assistant，撤回用）/ `'from-here'`（这条及之后）。找不到 messageId 抛「这条消息已经不在了，请重开对话看看」 |
 | `convs:regenerate` | (cardId, convId, messageId, {dropAfter, content?}) → {ok} | 删掉这条（`content` 有值则先改内容）→ 重新请求，回复照旧走推送事件。`dropAfter:false` 时新回复**插回原位置**。这条前面没有消息（对话第一条）时抛中文错误 |
-| `convs:branch` | (cardId, convId, messageId) → Conversation | 复制到这条为止建新对话（每条重新生成 id），标题 `原标题 · 分支`，写 `branchFrom`；原对话不碰 |
+| `convs:branch` | (cardId, convId, messageId) → Conversation | 复制到这条为止建新对话（每条重新生成 id），标题 `原标题 · 分支`，写 `branchFrom`；原对话不碰。**记忆按 §9.8 的规则复制快照**，过滤分支点之后才产生的条目 |
+| `memory:get` | (cardId, convId) → `{ memory, messageCount, busy }` | 记忆页用；旧对话返回空记忆；`busy` = 该对话正在跑记忆任务 |
+| `memory:add-entry` | (cardId, convId, layer, content) → `{ memory }` | 手动添加；空文本拒绝；单条 300 字；`revision++` |
+| `memory:update-entry` | (cardId, convId, layer, entryId, content) → `{ memory }` | 手动修改；`revision++` |
+| `memory:delete-entry` | (cardId, convId, layer, entryId) → `{ memory }` | 手动删除；`revision++` |
+| `memory:clear-layer` | (cardId, convId, layer) → `{ memory }` | 清空一层；**不改变 `coveredCount`** |
+| `memory:organize` | (cardId, convId, mode?: `'normal'` \| `'rebuild'`) → `{ ok }` | 手动「现在整理一次」/「从头整理」；立即返回，进度走 `memory:event`。`rebuild` = 清空三层 + `coveredCount = 0` 后从头整理 |
+| `memory:refresh` | (cardId, convId, anchorIndex?) → `{ ok }` | 改动已覆盖旧消息后的「一起整理记忆」；立即返回，结果走事件 |
 | `app:copy-text` | text → void | 主进程 `clipboard.writeText`（理由见 §3 消息级操作一节） |
 | `chat:send` | (cardId, convId, text) → {ok} | 立即返回，流式经推送事件 |
 | `chat:abort` | (cardId, convId) → void | 中止 fetch，半截文本已持久化 |
 | `export:card` | cardId → {path\|null} | 保存对话框，默认名 `<卡名>.json`（卡名里的非法文件名字符先替换成 `_`）；写自有格式（含头像 base64，见 §3「卡片的外部格式与导入映射」）。用户取消返回 `null` |
 | `import:cards` | — → ImportReport[] | 打开对话框**多选** JSON；逐个识别格式（自有 / Dify / 认不出）并转换落盘；**一张失败不影响其余**。返回每张一张报告（结构见 §3），界面据此显示导入结果。**不抛异常**（失败写在报告的 `error` 里） |
 
-### 推送频道（main → renderer，`chat:event`）
+### 推送频道（main → renderer，`chat:event` 与 `memory:event`）
 
 ```ts
 type ChatEvent =
   | { type: 'delta';   cardId: string; convId: string; text: string }
-  | { type: 'done';    cardId: string; convId: string; fullText: string }  // 已持久化
+  | { type: 'done';    cardId: string; convId: string; fullText: string }  // 已持久化（已剥离记忆标记）
   | { type: 'error';   cardId: string; convId: string; message: string; detail?: string }
-  | { type: 'aborted'; cardId: string; convId: string; partial: string }   // 已持久化
+  | { type: 'aborted'; cardId: string; convId: string; partial: string }   // 已持久化（已剥离记忆标记）
+
+type MemoryEvent =
+  | { type: 'updated'; cardId: string; convId: string }
+  | { type: 'busy';    cardId: string; convId: string; busy: boolean }
+  | { type: 'error';   cardId: string; convId: string; message: string; detail?: string }
+  | { type: 'noticed'; cardId: string; convId: string; message: string }  // 只写入记忆、没有正文时的 toast
 ```
+
+`MemoryEvent` 只推「有变化」，不推完整记忆对象；记忆页收到 `updated` 后重新 `memory:get`。
 
 ### preload API（window.api）
 
-`cards.{list,save,delete,pickAvatar}`、`meta.{get,update}`、`settings.{get,save,test}`、`providers.{list,save,delete,setCurrent,fetchModels}`、`convs.{list,get,create,rename,delete,updateMessage,deleteMessage,regenerate,branch}`、`chat.{send,abort,onEvent(cb)→unsubscribe}`、`copyText(text)`、`io.{exportCard,importCards}`。
+`cards.{list,save,delete,pickAvatar}`、`meta.{get,update}`、`settings.{get,save,test}`、`providers.{list,save,delete,setCurrent,fetchModels}`、`convs.{list,get,create,rename,delete,updateMessage,deleteMessage,regenerate,branch}`、`memory.{get,addEntry,updateEntry,deleteEntry,clearLayer,organize,refresh,onEvent(cb)→unsubscribe}`、`chat.{send,abort,onEvent(cb)→unsubscribe}`、`copyText(text)`、`io.{exportCard,importCards}`。
 
 聊天数据流：渲染层 `chat.send()` 拿到 `{ok}` 后乐观显示用户气泡，随后只消费 `chat:event` 推送；`delta` 累加进气泡，`done`/`aborted` 定稿，`error` 在气泡上方显示中文横幅（`detail` 作灰色小字）。渲染层的流式状态以事件为准，不依赖 send 的返回值。
 
@@ -313,16 +376,34 @@ type ChatEvent =
 5. 导出：头像读为 `avatarDataUrl`（data:image/...;base64）写入 JSON；导入：解码回 avatars/ 目录，失败回退占位并写进导入报告
 6. **外部卡的头像是 http 地址时**：先下载（超时 10 秒、超 5MB 放弃）再走上面同一条路；失败则留空用占位，并写进报告。这是导入过程里**唯一的联网动作**，且只针对用户选中的文件里写着的地址
 
-## 6. 世界书注入算法（纯函数，main/worldbook.ts）
+## 6. 世界书注入算法 + 消息组装（纯函数，main/worldbook.ts）
 
-1. **扫描窗口**：最近 8 条消息 + 当前用户消息，拼接转小写
+1. **扫描窗口**：**实际发送的**最近 8 条历史消息 + 当前用户消息，拼接转小写（被记忆窗口截掉的旧消息不再参与扫描——它们对 AI 来说已经「忘记」了）
 2. **匹配**：条目激活 = `alwaysOn` 或任一关键词为窗口子串（关键词 trim + 小写，空关键词忽略）
 3. **排序**：激活条目按 `order` 升序（平局按标题），常驻与触发条目同一规则，按 id 去重
-4. **注入**：`[世界书条目]\n# 标题\n内容...` 拼块，与**前置词**、**角色设定（正文）**合并为**首条 system 消息**，顺序固定为 `世界书块 + '\n\n' + prePrompt + '\n\n' + systemPrompt`（任一为空则跳过那一段）；之后是完整对话历史；然后是当前用户消息
+4. **首条 system**：`[世界书条目]\n# 标题\n内容...` 拼块，与**前置词**、**角色设定（正文）**合并，顺序固定为 `世界书块 + '\n\n' + prePrompt + '\n\n' + systemPrompt`（任一为空则跳过那一段）
    - 前置词排在正文**前面**：它是「角色是谁」的总纲，正文是展开；顺序反了读起来会别扭
-5. **后置词**（`card.suffix` 去空白后非空时）：作为**最后一条 system 消息**追加在用户消息之后。它必须待在消息序列的**末尾**才有效——很多卡用它约束输出格式（"只输出 JSON""不要旁白"这类），折进人设里就不灵了。为空则**一条都不加**，不留空消息
+5. **历史窗口**：`memoryEnabled !== false` 且对话有记忆时：
+   ```ts
+   const start = memoryWindowStart(history.length, memory.coveredCount, config.recentCount)
+   // = Math.min(Math.max(0, len - recentCount), Math.max(0, Math.min(coveredCount, len)))
+   ```
+   发送 `history.slice(start)`；关闭记忆或 `coveredCount === 0` 时 `start = 0`，与改动前**逐字一致**。
+   - `history.length` 必须是**不含当前用户消息**的历史条数
+   - 语义 = 最近 N 条 ∪ 尚未写进记忆的旧消息：`coveredCount` 以内的旧原文可以省略，但「还没被记忆接住」的一条都不能丢
+6. **记忆块**（启用且对话有记忆时）：在历史之后、当前用户消息之前插入**单独一条 system**：
+   - 顺序固定为 `永久 → 长期 → 短期`（越靠近当前回合的越新）；空层不输出
+   - 三层都空时只输出一句「（暂时还没有记住的事）」+ 写入规则
+   - 写入规则告诉 AI：值得记的新信息用 `【记忆】一句话事实【/记忆】` 写在回复末尾，每轮最多 3 条（解析端最多接受 5 条），没有新信息就不写
+   - 记忆块**不折进首条 system**：首条 system 管「你是谁」，记忆块管「发生了什么」
+   - `memoryEnabled === false` 时**整块不插入**
+7. **当前用户消息**：`currentText` 非空时追加
+8. **后置词**（`card.suffix` 去空白后非空时）：作为**最后一条 system 消息**追加在用户消息之后。它必须待在消息序列的**末尾**才有效——很多卡用它约束输出格式（"只输出 JSON""不要旁白"这类），折进人设里就不灵了。为空则**一条都不加**，不留空消息
    - 首条 system 与末条 system 的分工：**开头管"你是谁"，结尾管"这条回复该怎么写"**
-6. **`buildMessages(card, history, currentText?)`**：`currentText` **可省略**——「重新输出」是让 AI 对已有的历史重答一遍，没有新的用户输入，不该凭空追加一条 user 消息（省略时扫描窗口就只用 history；此时后置词仍照常追加在末尾）
+9. **`buildMessages(card, history, currentText?, memoryContext?)`**：
+   - `currentText` **可省略**——「重新输出」是让 AI 对已有的历史重答一遍，没有新的用户输入，不该凭空追加一条 user 消息
+   - `memoryContext = { memory?, recentCount, enabled }`；缺省时行为与改动前完全一致
+   - 完整顺序：`首条 system → 最近历史窗口 → 记忆 system → 当前用户消息 → 后置词`
 
 ## 7. 聊天请求（流式 / 非流式，main/chatClient.ts）
 
@@ -345,6 +426,7 @@ type ChatEvent =
 - **持久化**：send 时先存用户消息（首条自动设标题、首次聊天自动收录历史），流结束后存 assistant 消息（完整或半截）
 - **错误映射（中文优先）**：401→"API Key 无效或未填写"；403→"没有访问权限"；404→"接口地址或模型名称不正确"；429→"请求太频繁，请稍后再试"；400/其他→透传 API 的 error.message；网络错误→"无法连接服务器，请检查网络和接口地址"；原始技术信息放灰色小字 detail
 - **退出安全**：`before-quit` 遍历活跃流，abort 并把已累计文本同步写入对话文件
+- **记忆后台请求（`requestCompletion`，见 §9）**：非流式、一次拿完整文本，**不注册 `cardId:convId` 流式锁**——所以记忆整理与正常聊天可以同时进行；固定 `temperature: 0.2`、`max_tokens: 4096`、超时 60 秒，复用本节的 URL 归一、请求头与错误映射
 
 ## 8. 打包
 
@@ -352,3 +434,178 @@ type ChatEvent =
 - 图标：build/icon.png（≥256×256，builder 自动转 .ico）
 - `.npmrc` 内置国内镜像（registry/electron_mirror/electron_builder_binaries_mirror → npmmirror）；备用环境变量：ELECTRON_MIRROR、ELECTRON_BUILDER_BINARIES_MIRROR
 - 未签名 exe 首次运行 SmartScreen 提示，README 已说明
+
+## 9. 记忆系统（三层记忆，main/memory.ts + main/memoryService.ts）
+
+> 产品规格见 requirements 3.9；本节是实现算法与边界。数据模型见 §3，请求组装见 §6，IPC 见 §4。
+
+### 9.1 归属、默认值与归一
+
+- 记忆**按对话**保存在 `Conversation.memory`；删除对话即删除记忆
+- 卡片级配置全部可选，由 `shared/memory.ts` 的 `resolveMemoryConfig(card)` 归一：
+
+  | 字段 | 含义 | 默认 | 范围 |
+  |---|---|---|---|
+  | `memoryEnabled` | 启用记忆 | `true` | 布尔 |
+  | `memoryRecentCount` | 每次带最近 N 条历史 | 6（用户和 AI 的消息各算一条） | 2–50 |
+  | `memoryShortLimit` | 短期容量（字） | 3000 | 200–20000 |
+  | `memoryShortBatch` | 短→长条数阈值 | 25 | 3–100 |
+  | `memoryLongLimit` | 长期容量（条） | 20 | 2–100 |
+  | `memoryLongBatch` | 长→永久条数阈值 | 10 | 2–50 |
+
+- 越界/垃圾值当「没设」，回落到默认；不报错。归一集中在 `cards:save` 与 `resolveMemoryConfig` 一处
+- 单条记忆硬上限 **300 字**；超出截断加省略号
+- 老对话读时补齐空记忆（`version:1, coveredCount:0, short:[], long:[], permanent:[], revision:0, failCount:0`），**不主动改写文件**
+
+### 9.2 请求窗口与注入
+
+- `memoryWindowStart(len, coveredCount, recentCount) = min(max(0, len - recentCount), clamp(coveredCount, 0, len))`
+  - `len` 不含当前用户消息；普通发送传 `conv.messages.slice(0, -1).length`，重新输出传 `prepareRegenerate` 返回的历史长度
+  - `coveredCount = 0` 或记忆关闭 → `start = 0`（全量历史，与改动前逐字一致）
+- 记忆块是**单独一条 system**，位置在最近历史之后、当前用户消息之前；顺序永久 → 长期 → 短期
+- 记忆块文本（约 120–180 字，见 §6）每次请求都带写入规则，AI 才知道怎么用 `【记忆】…【/记忆】`
+- 世界书扫描只看**实际发送的最近 8 条** + 当前用户消息
+
+### 9.3 自动写入（AI 标记）
+
+**解析**（`main/memory.ts: parseMemoryMarkers`）：
+
+1. 只处理 assistant 回复；用户消息不解析
+2. 支持 `【记忆】…【/记忆】` 与 `[记忆]…[/记忆]`
+3. **代码围栏内不解析**：维护 ``` 开闭计数，围栏里的标记当普通文字
+4. 完整标记取出后按行拆成多条；`trim`、丢弃空条目、单条截到 300 字
+5. **未闭合**：从最后一个未闭合标记起到文本末尾丢弃，不写记忆；`hadUnclosed = true`
+6. **去重**：规范化（去空白/中英文标点、转小写）后，完全相同或一方包含另一方视为重复；先同轮去重，再与现有短期条目去重
+7. 一轮最多接受 5 条（提示词要求 3 条）
+
+**流式过滤**（`MemoryFilter`）：
+
+- 不能只在落盘时剥离，否则打字过程中用户会先看到 `【记忆】`
+- `push(chunk, emit)` 内部维护缓冲区：不在标记内时，保留末尾可能是标记前缀的最长后缀（如「【记」），其余立即 emit；进入标记后只累积、不 emit；`finish()` 时未闭合的内容丢弃并标记
+- 落盘、`done` / `aborted` 事件、气泡显示都用 `cleaned` 文本；**用户消息与记忆正文都不受影响**
+
+**持久化**：
+
+- 条目与 assistant 消息**同一次 `saveConversation`** 写入；`source: 'ai'`，`sourceMessageIds = [上一条用户消息 id, 本条 assistant 消息 id]`
+- 只有标记没有正文：**不插入空 assistant 消息**，发 `done` + `memory:event`，界面 toast「AI 把这条回复写进了记忆」
+- aborted / error 半截：闭合条目照写，未闭合丢弃；已落盘半截文本必须是清理后的
+- **自动写入不推进 `coveredCount`**：标记只是顺手记录，不能代表这段原文已被完整总结；只有兜底总结成功才推进
+
+### 9.4 兜底总结
+
+**触发**（每轮 assistant 落盘后）：
+
+```ts
+const len = conv.messages.length
+const overflow = len - recentCount - coveredCount
+const batch = Math.max(recentCount, 4)
+if (overflow >= batch) {
+  const start = coveredCount
+  const end = Math.min(len - recentCount, start + 30)
+  summarizeChunk(start, end)
+}
+```
+
+- 「最近 N 条」永远保留原文；只总结已掉出窗口且未覆盖的消息
+- 单次最多 30 条或 6000 字（先到先停）
+
+**请求**（`requestCompletion`）：
+
+- 非流式，`temperature 0.2`、`max_tokens 4096`、超时 60 秒；模型 = 卡片模型或供应商默认模型
+- system：「你是记忆整理助手。只输出 JSON：`{"entries":["一句话事实"]}`。每条一句话；只写身份、关系、承诺、重要事件、喜好、约定；不写寒暄、动作、猜测；最多 12 条；每条不超过 300 字。」
+- user：待整理对话片段 + 已有短期记忆（要求不重复）
+
+**应用**（乐观并发）：
+
+1. 重新读取对话，校验 chunk 内每条消息的 `id` 与 `editedAt` 仍在且未变；有变化则放弃本次应用
+2. 条目去重后追加到 `short`（`source: 'summary'`，`sourceMessageIds` = chunk 内消息 id）
+3. `coveredCount = max(coveredCount, chunk 末尾位置)`；`revision++`、`lastRunAt=now`、`failCount=0`、清除 `lastError`
+4. 空数组也算成功：推进 `coveredCount`，记忆页显示「已整理 N 条」
+5. 推送 `memory:event { type:'updated' }`
+
+**失败**：不推进 `coveredCount`；`failCount++`，`retryAfter = now + min(60s * 2^(failCount-1), 15min)`；写 `lastError`；推 `error` 事件。
+
+### 9.5 向上沉淀（25→1、10→1）
+
+**短期 → 长期**：
+
+- 触发（谁先到算谁）：
+  - `short.length >= shortBatch`（默认 25）
+  - `memoryChars(short) > shortLimit`（默认 3000 字）
+- 取**最早的** `min(shortBatch, short.length)` 条（至少 1 条），让 AI 合成 **1 条长期记忆**（压缩后的故事/设定）
+- 提示词：合并重复、新信息覆盖旧信息、删琐碎；只留身份/关系/事件/偏好/约定；输出 `{"long":"……"}`（也接受 `{"long":["……"]}`，统一取第一条或拼接后截到 300 字）
+- 成功后：从短期删除被合并条目；长期追加 1 条（`source: 'consolidate'`，`sourceMessageIds` = 被合并条目来源的并集）
+- 若短期仍然超限：**下一轮**再整理，一轮最多一次，避免刷请求
+
+**长期 → 永久**：
+
+- 触发（谁先到算谁）：
+  - `long.length >= longBatch`（默认 10）
+  - `long.length > longLimit`（默认 20，安全网）
+- 取最早的 `min(longBatch, long.length)` 条，合成 **1 条永久记忆**
+- 提示词：只留身份、关系、长期设定、重大转折；永久层尽量稳定
+- 成功后：长期删除被合并条目；永久追加 1 条
+
+**通用规则**：
+
+- 沉淀是**覆盖型**操作：请求前记下 `revision`，应用时不一致（用户中途改过记忆）则放弃结果并稍后重试，绝不覆盖用户刚改的内容
+- 解析失败、或输入有内容但输出为空 → 视为失败，**原记忆完全不变**
+- 永久层没有硬上限；记忆页超过 20 条时给灰色提醒
+- 手写条目与 AI 条目一视同仁，都参与合并/改写/清理
+
+### 9.6 修正与重建
+
+- `memory:refresh(cardId, convId, anchorIndex?)`：输入当前三层记忆 + 修改点附近 ±10 条（再拼最近 20 条，总字数上限 6000），输出完整三层 JSON；用于「改/删/重发一条已被覆盖的消息」。**best effort**，不承诺完整重算
+- `memory:organize(mode:'rebuild')`：清空三层 + `coveredCount = 0`，再按 9.4 的 chunk 从头整理；用于分支后清理、或用户主动「从头整理」
+- 两者都走同一套任务锁、退避、JSON 容错与 `revision` 校验
+
+### 9.7 任务调度、并发、失败
+
+- `memoryJobs: Map<cardId:convId, { controller, rerun }>`：同一对话同一时刻只跑一个任务；忙时只置 `rerun`，结束后再跑一轮
+- 一轮任务最多 3 步：兜底总结 → 短→长 → 长→永久；每步成功才继续
+- 记忆任务与聊天**完全隔离**：用 `requestCompletion`，不占用流式锁；总结时继续聊天不会报「正在回复中」
+- 所有记忆「读 → 改 → 写」走 `withConvLock(cardId, convId, fn)`，后台任务与用户编辑串行
+- 用户编辑记忆时若任务在跑：拒绝并提示「正在整理记忆，请稍候」；消息操作不受影响
+- 失败不弹聊天横幅；聊天页「记忆」入口显示小红点，记忆页显示中文原因与重试
+- `before-quit` 调 `stopAllMemoryJobs()`，abort 并等待落盘
+
+### 9.8 `coveredCount`、消息操作与分支
+
+**消息操作后的水位调整**：
+
+```ts
+function removeCoveredRange(coveredCount: number, start: number, count: number): number {
+  const overlap = Math.max(0, Math.min(coveredCount, start + count) - start)
+  return Math.max(0, coveredCount - overlap)
+}
+```
+
+| 操作 | `coveredCount` |
+|---|---|
+| `deleteMessage('from-here')` | `min(coveredCount, idx)` |
+| `deleteMessage('only')` | `removeCoveredRange(coveredCount, idx, 1)` |
+| `deleteMessage('reply-too')` | 按实际删除条数调用 |
+| `updateMessage(dropAfter=true)` | `min(coveredCount, idx)` |
+| `updateMessage(dropAfter=false)` | 若 `idx < coveredCount` 且内容有变 → `min(coveredCount, idx)`；否则不变 |
+| `prepareRegenerate` | `min(coveredCount, keep)`；目标是已覆盖的用户消息且内容有变时再 `min(coveredCount, idx)` |
+| `appendAssistant` | 不变；`insertAt < coveredCount` 时 `coveredCount = insertAt` |
+
+**分支复制（防未来信息泄漏）**：
+
+1. 只复制 `sourceMessageIds` 全部落在分支前缀内的条目；`source === 'user'` 的条目始终复制
+2. 被丢弃的条目若包含前缀内的来源，把 `coveredCount` 退到最早的那个来源下标——宁可重发原文，也不静默丢
+3. 来源不明（`sourceMessageIds` 为空且不是用户条目）的条目不复制，`coveredCount = 0`
+4. 复制后的条目换新 id；`coveredCount = min(原 coveredCount, 分支消息数, safeCovered)`
+
+### 9.9 风险与已知限制
+
+1. **N=6 很小**：并集规则保证不丢未总结内容，但整理滞后时单次请求的 token 会临时变多
+2. **额外请求成本**：兜底总结大约每 6 条新消息一次；沉淀每 25 条短期一次；界面必须提示会额外调用 AI
+3. **角色模型不一定守标记**：兜底总结是主保险；解析对未闭合、多条、空正文都做容错
+4. **记忆漂移/矛盾**：靠沉淀提示词「新信息覆盖旧信息」+ 用户可编辑兜底
+5. **分支的未来信息泄漏**：用 `sourceMessageIds` 过滤；混合条目被丢弃时 `coveredCount` 回退
+6. **超长对话追赶**：兜底一次最多 30 条/6000 字，老对话需要几次回复才追平
+7. **永久层无硬上限**：界面显示条数并在超过 20 条时提醒，不自动裁剪
+8. **注入体积**：默认上限下记忆总量约 1 万–1.5 万字；超过 1.2 万字时记忆页给「小上下文模型可能放不下」的灰色提醒
+9. **记忆任务进行中不能编辑记忆**：会提示「正在整理记忆，请稍候」，这是有意的并发保护
+10. **五个参数都在卡片编辑页可改**：改完从下一条消息开始生效；参数值会随 `Card` 导出/导入，但对话与记忆本身不导出

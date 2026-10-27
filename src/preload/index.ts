@@ -5,10 +5,15 @@ import type {
   Card,
   ChatEvent,
   Conversation,
+  ConversationMemory,
   ConvSummary,
   DeleteMode,
   FetchModelsResult,
   ImportReport,
+  MemoryEvent,
+  MemoryLayer,
+  MemoryOrganizeMode,
+  MemoryView,
   MetaStore,
   Provider,
   Settings,
@@ -91,6 +96,46 @@ const api: Api = {
       ),
     branch: (cardId: string, convId: string, messageId: string) =>
       invoke<Conversation>(IPC.convsBranch, cardId, convId, messageId)
+  },
+  memory: {
+    get: (cardId: string, convId: string) =>
+      invoke<MemoryView>(IPC.memoryGet, cardId, convId),
+    addEntry: (cardId: string, convId: string, layer: MemoryLayer, content: string) =>
+      invoke<ConversationMemory>(IPC.memoryAddEntry, cardId, convId, layer, content),
+    updateEntry: (
+      cardId: string,
+      convId: string,
+      layer: MemoryLayer,
+      entryId: string,
+      content: string
+    ) =>
+      invoke<ConversationMemory>(
+        IPC.memoryUpdateEntry,
+        cardId,
+        convId,
+        layer,
+        entryId,
+        content
+      ),
+    deleteEntry: (cardId: string, convId: string, layer: MemoryLayer, entryId: string) =>
+      invoke<ConversationMemory>(
+        IPC.memoryDeleteEntry,
+        cardId,
+        convId,
+        layer,
+        entryId
+      ),
+    clearLayer: (cardId: string, convId: string, layer: MemoryLayer) =>
+      invoke<ConversationMemory>(IPC.memoryClearLayer, cardId, convId, layer),
+    organize: (cardId: string, convId: string, mode?: MemoryOrganizeMode) =>
+      invoke<{ ok: boolean }>(IPC.memoryOrganize, cardId, convId, mode ?? 'normal'),
+    onEvent: (cb: (ev: MemoryEvent) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, ev: MemoryEvent): void => cb(ev)
+      ipcRenderer.on(IPC.memoryEvent, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.memoryEvent, listener)
+      }
+    }
   },
   chat: {
     send: (cardId: string, convId: string, text: string) =>

@@ -5,6 +5,7 @@ import { access } from 'fs/promises'
 import { ensureStore, getAvatarsDir, initStore } from './store'
 import { ensureProviders } from './providers'
 import { pendingStreamCount, registerIpc, stopAllStreams } from './ipc'
+import { pendingMemoryJobCount, stopAllMemoryJobs } from './memoryService'
 
 // 必须在 app ready 之前调用：重定向 userData 到 %APPDATA%\ai-chat-cards
 initStore()
@@ -85,11 +86,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// 退出安全：正在回复时先把流中止，等半截回复写完再真正退出
+// 退出安全：正在回复/整理记忆时先中止，等半截回复与记忆落盘再真正退出
 let quitting = false
 app.on('before-quit', (e) => {
-  if (quitting || pendingStreamCount() === 0) return
+  if (quitting) return
+  if (pendingStreamCount() === 0 && pendingMemoryJobCount() === 0) return
   quitting = true
   e.preventDefault()
-  void stopAllStreams().finally(() => app.quit())
+  void Promise.allSettled([stopAllStreams(), stopAllMemoryJobs()]).finally(() => app.quit())
 })

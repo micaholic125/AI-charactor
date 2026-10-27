@@ -10,6 +10,7 @@ export type View =
   | { name: 'apiConfig' } // API 配置：供应商列表（第三个底部栏目）
   | { name: 'cardDetail'; cardId: string } // 卡片详情：对话列表
   | { name: 'chat'; cardId: string; convId: string }
+  | { name: 'memory'; cardId: string; convId: string } // 记忆区（每个对话一份）
   | { name: 'settings' }
   | { name: 'editor'; cardId?: string } // cardId 为空 = 新建
 

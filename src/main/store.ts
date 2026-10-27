@@ -8,13 +8,17 @@ import { randomBytes, randomUUID } from 'crypto'
 import type {
   Card,
   ChatMessage,
+  ConversationMemory,
   ConvSummary,
   Conversation,
   DeleteMode,
+  MemoryEntry,
+  MemoryLayer,
   MetaStore,
   Settings
 } from '@shared/types'
 import { DEFAULT_META, DEFAULT_SETTINGS, createSampleCard } from '@shared/types'
+import { emptyMemory, normalizeMemory, normalizeMemoryContent } from '@shared/memory'
 
 // ---------- 路径 ----------
 
@@ -179,6 +183,13 @@ function pickCardMaxTokens(v: unknown): number | undefined {
   return n >= 1 && n <= 131072 ? n : undefined
 }
 
+/** 卡片级记忆数字：只收范围内的整数，越界/垃圾一律当「没设」（回落到默认） */
+function pickCardIntInRange(v: unknown, min: number, max: number): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
+  const n = Math.floor(v)
+  return n >= min && n <= max ? n : undefined
+}
+
 /** 新建（无 id 时分配 uuid）或更新卡片 */
 export async function saveCard(input: Card): Promise<Card> {
   const now = Date.now()
@@ -200,6 +211,13 @@ export async function saveCard(input: Card): Promise<Card> {
     // 生成参数：缺省 = 跟随设置（归一在校验里做一处，请求时直接用，不再兜底）
     temperature: pickCardTemperature(input.temperature),
     maxTokens: pickCardMaxTokens(input.maxTokens),
+    // 记忆设置：缺省 = 用 shared/memory.ts 的默认值；越界/垃圾当「没设」
+    memoryEnabled: typeof input.memoryEnabled === 'boolean' ? input.memoryEnabled : undefined,
+    memoryRecentCount: pickCardIntInRange(input.memoryRecentCount, 2, 50),
+    memoryShortLimit: pickCardIntInRange(input.memoryShortLimit, 200, 20000),
+    memoryShortBatch: pickCardIntInRange(input.memoryShortBatch, 3, 100),
+    memoryLongLimit: pickCardIntInRange(input.memoryLongLimit, 2, 100),
+    memoryLongBatch: pickCardIntInRange(input.memoryLongBatch, 2, 50),
     createdAt: idx >= 0 ? cards[idx].createdAt : now,
     updatedAt: now
   }
@@ -334,6 +352,21 @@ function ensureMessageIds(conv: Conversation): Conversation {
   return touched ? { ...conv, messages } : conv
 }
 
+/**
+ * 老对话兼容：消息没有 id 就补确定性 id；没有 memory 就补空记忆。
+ * 只在内存里补，**不主动改写用户的文件**——下次这条对话因为别的原因被保存时自然落盘。
+ * 见 docs/tech.md §9.1。
+ */
+function ensureConversation(conv: Conversation): Conversation {
+  const withIds = ensureMessageIds(conv)
+  const memory = normalizeMemory(withIds.memory)
+  memory.coveredCount = Math.max(
+    0,
+    Math.min(memory.coveredCount, (withIds.messages ?? []).length)
+  )
+  return { ...withIds, memory }
+}
+
 /** 加载某卡片的全部对话进缓存（只读一次目录） */
 async function loadCardConvs(cardId: string): Promise<Map<string, Conversation>> {
   const cached = convCache.get(cardId)
@@ -344,7 +377,7 @@ async function loadCardConvs(cardId: string): Promise<Map<string, Conversation>>
   for (const f of files) {
     if (!f.endsWith('.json')) continue
     try {
-      const conv = ensureMessageIds(await readJson<Conversation>(join(dir, f)))
+      const conv = ensureConversation(await readJson<Conversation>(join(dir, f)))
       map.set(conv.id, conv)
     } catch {
       /* 损坏的对话文件跳过（不阻塞其余） */
@@ -376,6 +409,12 @@ export async function getConversation(cardId: string, convId: string): Promise<C
 
 export async function saveConversation(conv: Conversation): Promise<void> {
   const map = await loadCardConvs(conv.cardId)
+  // 每次保存都把记忆收拾成合法结构（老对话第一次因别的原因保存时，memory 自然落盘）
+  conv.memory = normalizeMemory(conv.memory)
+  conv.memory.coveredCount = Math.max(
+    0,
+    Math.min(conv.memory.coveredCount, conv.messages.length)
+  )
   map.set(conv.id, conv)
   await enqueueWrite(convFile(conv.cardId, conv.id), JSON.stringify(conv, null, 2))
 }
@@ -392,10 +431,172 @@ export async function createConversation(card: Card): Promise<Conversation> {
     messages:
       card.greeting.trim() !== ''
         ? [{ id: randomUUID(), role: 'assistant', content: card.greeting, ts: now }]
-        : []
+        : [],
+    memory: emptyMemory()
   }
   await saveConversation(conv)
   return conv
+}
+
+// ---------- 记忆（按对话保存，见 docs/tech.md §9） ----------
+
+/** 同一个对话的记忆「读 → 改 → 写」串行，避免后台任务与用户编辑互相覆盖 */
+const convLocks = new Map<string, Promise<unknown>>()
+
+export function withConvLock<T>(
+  cardId: string,
+  convId: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
+  const key = `${cardId}:${convId}`
+  const prev = convLocks.get(key) ?? Promise.resolve()
+  const run = prev.then(fn, fn)
+  // 队列本身永不拒绝；失败由调用方拿到 run 自己处理
+  convLocks.set(key, run.then(() => undefined, () => undefined))
+  return run
+}
+
+function ensureConversationMemory(conv: Conversation): ConversationMemory {
+  conv.memory = normalizeMemory(conv.memory)
+  conv.memory.coveredCount = Math.max(
+    0,
+    Math.min(conv.memory.coveredCount, conv.messages.length)
+  )
+  return conv.memory
+}
+
+/**
+ * 删除/截断 [start, start+count) 这些消息后，记忆水位应该退到哪。
+ * 只有落在水位以内的消息被删掉才会让水位前移（见 docs/tech.md §9.8）。
+ */
+export function removeCoveredRange(
+  coveredCount: number,
+  start: number,
+  count: number
+): number {
+  const overlap = Math.max(0, Math.min(coveredCount, start + count) - start)
+  return Math.max(0, coveredCount - overlap)
+}
+
+/** 返回给 IPC / 渲染层的副本，避免调用方持有缓存里的活对象 */
+function cloneMemory(memory: ConversationMemory): ConversationMemory {
+  const copyEntries = (entries: ConversationMemory['short']): ConversationMemory['short'] =>
+    entries.map((e) => ({ ...e, sourceMessageIds: [...e.sourceMessageIds] }))
+  return {
+    ...memory,
+    short: copyEntries(memory.short),
+    long: copyEntries(memory.long),
+    permanent: copyEntries(memory.permanent)
+  }
+}
+
+/** 在锁内读改写一条对话；`fn` 抛错则不会保存 */
+async function mutateConversation<T>(
+  cardId: string,
+  convId: string,
+  fn: (conv: Conversation) => T
+): Promise<T> {
+  return withConvLock(cardId, convId, async () => {
+    const conv = await getConversation(cardId, convId)
+    if (!conv) throw new Error('对话不存在')
+    ensureConversationMemory(conv)
+    const result = fn(conv)
+    await saveConversation(conv)
+    return result
+  })
+}
+
+export async function getConversationMemory(
+  cardId: string,
+  convId: string
+): Promise<{ memory: ConversationMemory; messageCount: number }> {
+  return withConvLock(cardId, convId, async () => {
+    const conv = await getConversation(cardId, convId)
+    if (!conv) throw new Error('对话不存在')
+    const memory = ensureConversationMemory(conv)
+    return { memory: cloneMemory(memory), messageCount: conv.messages.length }
+  })
+}
+
+export async function addMemoryEntry(
+  cardId: string,
+  convId: string,
+  layer: MemoryLayer,
+  content: string
+): Promise<ConversationMemory> {
+  const text = normalizeMemoryContent(content)
+  if (text === '') throw new Error('记忆内容不能为空')
+
+  return mutateConversation(cardId, convId, (conv) => {
+    const memory = conv.memory as ConversationMemory
+    const now = Date.now()
+    memory[layer].push({
+      id: randomUUID(),
+      content: text,
+      source: 'user',
+      sourceMessageIds: [],
+      createdAt: now,
+      updatedAt: now
+    })
+    memory.revision += 1
+    return cloneMemory(memory)
+  })
+}
+
+export async function updateMemoryEntry(
+  cardId: string,
+  convId: string,
+  layer: MemoryLayer,
+  entryId: string,
+  content: string
+): Promise<ConversationMemory> {
+  const text = normalizeMemoryContent(content)
+  if (text === '') throw new Error('记忆内容不能为空')
+
+  return mutateConversation(cardId, convId, (conv) => {
+    const memory = conv.memory as ConversationMemory
+    const entry = memory[layer].find((e) => e.id === entryId)
+    if (!entry) throw new Error('这条记忆已经不在了，请刷新看看')
+    if (entry.content !== text) {
+      entry.content = text
+      entry.updatedAt = Date.now()
+      memory.revision += 1
+    }
+    return cloneMemory(memory)
+  })
+}
+
+export async function deleteMemoryEntry(
+  cardId: string,
+  convId: string,
+  layer: MemoryLayer,
+  entryId: string
+): Promise<ConversationMemory> {
+  return mutateConversation(cardId, convId, (conv) => {
+    const memory = conv.memory as ConversationMemory
+    const next = memory[layer].filter((e) => e.id !== entryId)
+    if (next.length === memory[layer].length) {
+      throw new Error('这条记忆已经不在了，请刷新看看')
+    }
+    memory[layer] = next
+    memory.revision += 1
+    return cloneMemory(memory)
+  })
+}
+
+export async function clearMemoryLayer(
+  cardId: string,
+  convId: string,
+  layer: MemoryLayer
+): Promise<ConversationMemory> {
+  return mutateConversation(cardId, convId, (conv) => {
+    const memory = conv.memory as ConversationMemory
+    if (memory[layer].length > 0) {
+      memory[layer] = []
+      memory.revision += 1
+    }
+    return cloneMemory(memory)
+  })
 }
 
 /** 对话标题上限 30 字，超出截断加省略号 */
@@ -448,8 +649,19 @@ export async function updateMessage(
   if (text === '') throw new Error('内容不能为空')
 
   const idx = findMessage(conv, messageId)
-  conv.messages[idx] = { ...conv.messages[idx], content: text, editedAt: Date.now() }
-  if (dropAfter) conv.messages = conv.messages.slice(0, idx + 1)
+  const previous = conv.messages[idx]
+  const changed = previous.content !== text
+  const memory = ensureConversationMemory(conv)
+
+  conv.messages[idx] = { ...previous, content: text, editedAt: Date.now() }
+  if (dropAfter) {
+    conv.messages = conv.messages.slice(0, idx + 1)
+    // 改过的这条重新算「未写进记忆」，后面的截断也一样
+    memory.coveredCount = Math.min(memory.coveredCount, idx)
+  } else if (changed && idx < memory.coveredCount) {
+    // 改了已覆盖的消息：从这条起重新进入发送范围，避免 AI 仍按旧记忆回答
+    memory.coveredCount = Math.min(memory.coveredCount, idx)
+  }
   conv.updatedAt = Date.now()
   await saveConversation(conv)
   return conv
@@ -484,6 +696,8 @@ export async function prepareRegenerate(
   }
 
   const text = (content ?? '').trim()
+  const changed = text !== '' && text !== target.content
+  const memory = ensureConversationMemory(conv)
   if (text !== '') {
     conv.messages[idx] = { ...target, content: text, editedAt: Date.now() }
   }
@@ -496,6 +710,14 @@ export async function prepareRegenerate(
   const skip = target.role === 'user' && conv.messages[idx + 1]?.role === 'assistant' ? 1 : 0
   const rest = conv.messages.slice(idx + 1 + skip)
   conv.messages = dropAfter ? history.slice() : [...history, ...rest]
+
+  // 水位跟着改写走：被替换的这条及之后都算「未写进记忆」。
+  // 改过已覆盖的用户消息时退到它本身（这条内容变了，旧记忆可能已不成立）
+  if (!dropAfter && target.role === 'user' && changed && idx < memory.coveredCount) {
+    memory.coveredCount = Math.min(memory.coveredCount, idx)
+  } else {
+    memory.coveredCount = Math.min(memory.coveredCount, keep)
+  }
 
   conv.updatedAt = Date.now()
   await saveConversation(conv)
@@ -513,14 +735,19 @@ export async function deleteMessage(
   if (!conv) throw new Error('对话不存在')
 
   const idx = findMessage(conv, messageId)
+  const memory = ensureConversationMemory(conv)
   if (mode === 'from-here') {
     conv.messages = conv.messages.slice(0, idx)
+    memory.coveredCount = Math.min(memory.coveredCount, idx)
   } else if (mode === 'reply-too') {
     // 「撤回」：自己发的话连同它引出的那条 AI 回复一起删（后面不是 AI 回复就只删这条）
     const next = conv.messages[idx + 1]
-    conv.messages.splice(idx, next?.role === 'assistant' ? 2 : 1)
+    const removed = next?.role === 'assistant' ? 2 : 1
+    conv.messages.splice(idx, removed)
+    memory.coveredCount = removeCoveredRange(memory.coveredCount, idx, removed)
   } else {
     conv.messages.splice(idx, 1)
+    memory.coveredCount = removeCoveredRange(memory.coveredCount, idx, 1)
   }
 
   conv.updatedAt = Date.now()
@@ -531,7 +758,9 @@ export async function deleteMessage(
 /**
  * 从某条消息分叉：把到这条为止的内容复制成一条新对话（含这条），之后的不要。
  * **每条消息都换新 id**——两边从此各改各的，共用 id 会让「按 id 定位」互相串台。
- * 原对话一个字都不动（只读它，不写回）。见 docs/tech.md §3。
+ * 记忆也复制一份快照，但**只带来源消息全部落在分支前缀内的条目**：
+ * 分支点之后才发生的事不能跟着过去（见 docs/tech.md §9.8）。
+ * 原对话一个字都不动（只读它，不写回）。
  */
 export async function branchConversation(
   cardId: string,
@@ -543,6 +772,66 @@ export async function branchConversation(
 
   const idx = findMessage(src, messageId)
   const now = Date.now()
+  const srcMemory = normalizeMemory(src.memory)
+  const prefix = src.messages.slice(0, idx + 1)
+  const prefixIds = new Set(prefix.map((m) => m.id))
+
+  // 旧消息 id → 新分支里的消息 id；记忆条目的来源 id 要跟着换，否则分支内无法再按来源过滤
+  const idMap = new Map<string, string>()
+  const messages: ChatMessage[] = prefix.map((m) => {
+    const id = randomUUID()
+    idMap.set(m.id, id)
+    return {
+      id,
+      role: m.role,
+      content: m.content,
+      ts: m.ts,
+      ...(m.editedAt === undefined ? {} : { editedAt: m.editedAt })
+    }
+  })
+
+  const cloneEntry = (entry: MemoryEntry): MemoryEntry => ({
+    ...entry,
+    id: randomUUID(),
+    sourceMessageIds: entry.sourceMessageIds
+      .map((id) => idMap.get(id))
+      .filter((id): id is string => typeof id === 'string')
+  })
+
+  let safeCovered = Math.min(srcMemory.coveredCount, prefix.length)
+  let hasUnknown = false
+
+  const copyLayer = (entries: MemoryEntry[]): MemoryEntry[] => {
+    const out: MemoryEntry[] = []
+    for (const entry of entries) {
+      // 用户手写的条目没有来源消息，始终跟着分支走
+      if (entry.source === 'user') {
+        out.push(cloneEntry(entry))
+        continue
+      }
+      // 来源不明的 AI 条目不能判断是否属于前缀，宁可不带、并让原文重新发送
+      if (entry.sourceMessageIds.length === 0) {
+        hasUnknown = true
+        continue
+      }
+      if (entry.sourceMessageIds.every((id) => prefixIds.has(id))) {
+        out.push(cloneEntry(entry))
+        continue
+      }
+      // 混合条目（一半在前缀内、一半在分支点之后）：丢弃，并把水位退到前缀内最早来源
+      const indices = entry.sourceMessageIds
+        .map((id) => prefix.findIndex((m) => m.id === id))
+        .filter((i) => i >= 0)
+      if (indices.length > 0) safeCovered = Math.min(safeCovered, Math.min(...indices))
+    }
+    return out
+  }
+
+  const short = copyLayer(srcMemory.short)
+  const long = copyLayer(srcMemory.long)
+  const permanent = copyLayer(srcMemory.permanent)
+  if (hasUnknown) safeCovered = 0
+
   const conv: Conversation = {
     id: randomUUID(),
     cardId,
@@ -550,13 +839,14 @@ export async function branchConversation(
     createdAt: now,
     updatedAt: now,
     branchFrom: { convId: src.id, title: src.title },
-    messages: src.messages.slice(0, idx + 1).map((m) => ({
-      id: randomUUID(),
-      role: m.role,
-      content: m.content,
-      ts: m.ts,
-      ...(m.editedAt === undefined ? {} : { editedAt: m.editedAt })
-    }))
+    messages,
+    memory: {
+      ...emptyMemory(),
+      short,
+      long,
+      permanent,
+      coveredCount: Math.max(0, Math.min(safeCovered, messages.length))
+    }
   }
   await saveConversation(conv)
   return conv

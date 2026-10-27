@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import type { Card, WorldbookEntry } from '@shared/types'
 import { providerLabel } from '@shared/types'
+import { resolveMemoryConfig } from '@shared/memory'
 import { useAppStore } from '../store/appStore'
 import { newId } from '../utils/format'
 import Avatar from '../components/Avatar'
@@ -72,6 +73,68 @@ function OptionalField({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * 记忆数字字段：失焦/回车才提交；非法值退回当前值。
+ * 沿用聊天页「调节参数」数字框的手感（见 docs/design.md §4）。
+ */
+function MemoryNumberField({
+  label,
+  hint,
+  suffix,
+  value,
+  min,
+  max,
+  disabled,
+  onCommit
+}: {
+  label: string
+  hint: string
+  suffix: string
+  value: number
+  min: number
+  max: number
+  disabled: boolean
+  onCommit: (n: number) => void
+}) {
+  const [text, setText] = useState(String(value))
+
+  useEffect(() => {
+    setText(String(value))
+  }, [value])
+
+  const commit = (): void => {
+    const n = Math.floor(Number(text))
+    if (!Number.isFinite(n) || n < min || n > max) {
+      setText(String(value))
+      return
+    }
+    onCommit(n)
+  }
+
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <div className="memory-number">
+        <input
+          className="field-input"
+          type="number"
+          min={min}
+          max={max}
+          value={text}
+          disabled={disabled}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+        />
+        <span className="field-hint">{suffix}</span>
+      </div>
+      <span className="field-hint">{hint}</span>
+    </label>
   )
 }
 
@@ -212,6 +275,9 @@ export default function CardEditorPage({ cardId }: Props) {
       onConfirm: goBack
     })
   }
+
+  const memoryConfig = resolveMemoryConfig(draft)
+  const memoryEnabled = draft.memoryEnabled !== false
 
   return (
     <div className="page">
@@ -371,6 +437,88 @@ export default function CardEditorPage({ cardId }: Props) {
               ))}
             </ul>
           )}
+        </section>
+
+        {/* 记忆设置：五个数字都可改；关闭记忆时置灰但保留数值。见 docs/design.md §4 */}
+        <section className="form-card">
+          <div className="section-head">
+            <div>
+              <h2 className="section-title">记忆</h2>
+              <span className="field-hint">
+                AI 会自动记住对话里的重要信息，并在下次聊天时带上；整理会额外调用 AI。
+              </span>
+            </div>
+          </div>
+
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={memoryEnabled}
+              onChange={(e) => patch({ memoryEnabled: e.target.checked })}
+            />
+            启用记忆
+          </label>
+          <span className="field-hint">
+            记忆按对话各存一份，不会跨对话共享；关闭后已有记忆仍然保留。
+          </span>
+
+          <div className="memory-settings">
+            <MemoryNumberField
+              label="记忆设定"
+              hint="用户和 AI 的消息各算一条；设为 6 就是最近 6 条消息（大约 3 句你的话 + 3 句 AI 的回复）。更早的内容靠记忆区记住；设得越大，请求越贵。"
+              suffix="条"
+              value={memoryConfig.recentCount}
+              min={2}
+              max={50}
+              disabled={!memoryEnabled}
+              onCommit={(n) => patch({ memoryRecentCount: n })}
+            />
+            <MemoryNumberField
+              label="短期记忆上限"
+              hint="短期记忆超过这个字数会自动整理进长期。"
+              suffix="字"
+              value={memoryConfig.shortLimit}
+              min={200}
+              max={20000}
+              disabled={!memoryEnabled}
+              onCommit={(n) => patch({ memoryShortLimit: n })}
+            />
+            <MemoryNumberField
+              label="短期整理条数"
+              hint="短期记忆满这么多条会自动合成 1 条长期记忆。"
+              suffix="条"
+              value={memoryConfig.shortBatch}
+              min={3}
+              max={100}
+              disabled={!memoryEnabled}
+              onCommit={(n) => patch({ memoryShortBatch: n })}
+            />
+            <MemoryNumberField
+              label="长期记忆上限"
+              hint="长期记忆最多保留这么多条；超过时也会触发整理。"
+              suffix="条"
+              value={memoryConfig.longLimit}
+              min={2}
+              max={100}
+              disabled={!memoryEnabled}
+              onCommit={(n) => patch({ memoryLongLimit: n })}
+            />
+            <MemoryNumberField
+              label="长期整理条数"
+              hint="长期记忆满这么多条会自动合成 1 条永久记忆。"
+              suffix="条"
+              value={memoryConfig.longBatch}
+              min={2}
+              max={50}
+              disabled={!memoryEnabled}
+              onCommit={(n) => patch({ memoryLongBatch: n })}
+            />
+          </div>
+
+          <span className="field-hint">
+            短期满 {memoryConfig.shortBatch} 条或 {memoryConfig.shortLimit} 字 → 合成 1 条长期；
+            长期满 {memoryConfig.longBatch} 条（上限 {memoryConfig.longLimit} 条）→ 合成 1 条永久。
+          </span>
         </section>
       </div>
 

@@ -29,6 +29,13 @@ export interface Card {
   // 判定一律用 typeof x === 'number'——0 是有效温度，靠真值判断会把「本卡设成 0」错当成「没设」
   temperature?: number // 0–2（聊天页「调节参数」面板可改）
   maxTokens?: number // 1–131072
+  // 记忆设置（见 tech.md §9）：全部可选，缺省用 shared/memory.ts 里的默认值
+  memoryEnabled?: boolean // 缺省 true
+  memoryRecentCount?: number // 「记忆设定」每次带 N 条历史消息，默认 6，2–50
+  memoryShortLimit?: number // 短期容量（字），默认 3000，200–20000
+  memoryShortBatch?: number // 短→长的条数阈值，默认 25，3–100
+  memoryLongLimit?: number // 长期容量（条），默认 20，2–100
+  memoryLongBatch?: number // 长→永久的条数阈值，默认 10，2–50
   createdAt: number
   updatedAt: number
 }
@@ -45,6 +52,56 @@ export interface ChatMessage {
   editedAt?: number
 }
 
+// ---------- 记忆（每个对话一份，见 docs/tech.md §9） ----------
+
+export type MemoryLayer = 'short' | 'long' | 'permanent'
+
+export interface MemoryEntry {
+  id: string
+  /** 一句话一条；硬上限 300 字（见 shared/memory.ts 的 MEMORY_ENTRY_MAX） */
+  content: string
+  /** ai = 回复标记；summary = 兜底总结；consolidate = 沉淀；user = 用户手写；repair = 修正 */
+  source: 'ai' | 'summary' | 'consolidate' | 'user' | 'repair'
+  /** 产生这条记忆的消息 id；分支时据此过滤「未来信息」。用户手写为 [] */
+  sourceMessageIds: string[]
+  createdAt: number
+  updatedAt?: number
+}
+
+export interface ConversationMemory {
+  version: 1
+  /** messages[0..coveredCount) 的原文已被记忆接住，可从请求里省略 */
+  coveredCount: number
+  short: MemoryEntry[]
+  long: MemoryEntry[]
+  permanent: MemoryEntry[]
+  /** 每次记忆变更 +1，用于后台任务与用户编辑的乐观并发 */
+  revision: number
+  lastRunAt?: number
+  /** 最近一次自动整理失败的中文原因；成功后清空 */
+  lastError?: string
+  failCount: number
+  /** 退避截止时间戳；未到点不自动重试，避免失败后每轮刷请求 */
+  retryAfter?: number
+}
+
+/** 记忆页读取用：记忆本体 + 对话消息数 + 是否正在跑记忆任务 */
+export interface MemoryView {
+  memory: ConversationMemory
+  messageCount: number
+  busy: boolean
+}
+
+export type MemoryOrganizeMode = 'normal' | 'rebuild'
+
+/** 记忆后台任务推送给渲染层的事件（channel: memory:event） */
+export type MemoryEvent =
+  | { type: 'updated'; cardId: string; convId: string }
+  | { type: 'busy'; cardId: string; convId: string; busy: boolean }
+  | { type: 'error'; cardId: string; convId: string; message: string; detail?: string }
+  /** 只写记忆、没有正文时的轻提示（界面 toast 一句话） */
+  | { type: 'noticed'; cardId: string; convId: string; message: string }
+
 /** 对话：一张卡下的一个独立聊天会话 */
 export interface Conversation {
   id: string
@@ -53,6 +110,8 @@ export interface Conversation {
   createdAt: number
   updatedAt: number
   messages: ChatMessage[]
+  /** 三层记忆；缺省 = 空记忆、coveredCount 0（老对话读取时补齐，不主动改写文件） */
+  memory?: ConversationMemory
   /** 由哪条对话分支出来的；无 = 不是分支。见 docs/tech.md §3 消息级操作 */
   branchFrom?: { convId: string; title: string }
 }
@@ -152,6 +211,13 @@ export const IPC = {
   convsDeleteMessage: 'convs:delete-message',
   convsRegenerate: 'convs:regenerate',
   convsBranch: 'convs:branch',
+  memoryGet: 'memory:get',
+  memoryAddEntry: 'memory:add-entry',
+  memoryUpdateEntry: 'memory:update-entry',
+  memoryDeleteEntry: 'memory:delete-entry',
+  memoryClearLayer: 'memory:clear-layer',
+  memoryOrganize: 'memory:organize',
+  memoryEvent: 'memory:event',
   copyText: 'app:copy-text',
   chatSend: 'chat:send',
   chatAbort: 'chat:abort',
@@ -290,6 +356,49 @@ export interface Api {
      * 每条消息都会换成新 id，原对话不受任何影响。返回新建的那条对话。
      */
     branch(cardId: string, convId: string, messageId: string): Promise<Conversation>
+  }
+  memory: {
+    /** 读取这个对话的三层记忆；老对话返回空记忆 */
+    get(cardId: string, convId: string): Promise<MemoryView>
+    /** 手动添加一条；空内容拒绝；单条 300 字 */
+    addEntry(
+      cardId: string,
+      convId: string,
+      layer: MemoryLayer,
+      content: string
+    ): Promise<ConversationMemory>
+    /** 手动修改一条 */
+    updateEntry(
+      cardId: string,
+      convId: string,
+      layer: MemoryLayer,
+      entryId: string,
+      content: string
+    ): Promise<ConversationMemory>
+    /** 手动删除一条 */
+    deleteEntry(
+      cardId: string,
+      convId: string,
+      layer: MemoryLayer,
+      entryId: string
+    ): Promise<ConversationMemory>
+    /** 清空一层；不改变 coveredCount */
+    clearLayer(
+      cardId: string,
+      convId: string,
+      layer: MemoryLayer
+    ): Promise<ConversationMemory>
+    /**
+     * 手动整理：立即在后台跑一次兜底总结。`rebuild` 会先清空三层与水位再从头整理。
+     * 立即返回，进度经 `memory:onEvent` 推送。
+     */
+    organize(
+      cardId: string,
+      convId: string,
+      mode?: MemoryOrganizeMode
+    ): Promise<{ ok: boolean }>
+    /** 订阅记忆后台任务事件，返回取消订阅函数 */
+    onEvent(cb: (ev: MemoryEvent) => void): () => void
   }
   chat: {
     /** 立即返回，回复内容经 chat:onEvent 推送 */

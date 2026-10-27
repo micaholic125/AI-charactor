@@ -12,22 +12,30 @@ import type {
   ChatMessage,
   Conversation,
   DeleteMode,
+  MemoryLayer,
+  MemoryOrganizeMode,
+  MemoryView,
   MetaStore,
   Provider,
   Settings
 } from '@shared/types'
 import { IPC } from '@shared/types'
+import { isMemoryLayer, normalizeMemory, resolveMemoryConfig } from '@shared/memory'
 import { exportCard, importCards } from './transfer'
 import {
+  addMemoryEntry,
   branchConversation,
+  clearMemoryLayer,
   copyAvatarFile,
   createConversation,
   deleteCard,
   deleteConversation,
+  deleteMemoryEntry,
   deleteMessage,
   getCard,
   getCards,
   getConversation,
+  getConversationMemory,
   getMeta,
   getSettings,
   isSafeAvatarName,
@@ -37,6 +45,7 @@ import {
   saveCard,
   saveConversation,
   saveSettings,
+  updateMemoryEntry,
   updateMessage,
   updateMeta
 } from './store'
@@ -57,12 +66,32 @@ import {
   saveProvider,
   setCurrentProvider
 } from './providers'
-import { buildMessages, type WireMessage } from './worldbook'
+import { buildMessages, type MemoryContext, type WireMessage } from './worldbook'
+import {
+  MemoryFilter,
+  dedupeEntryTexts,
+  parseMemoryMarkers,
+  type ParsedMemoryMarkers
+} from './memory'
+import {
+  isMemoryBusy,
+  notifyMemoryEvent,
+  organizeNow,
+  scheduleMemoryJobs,
+  setMemoryNotifier
+} from './memoryService'
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 const AVATAR_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif']
 
 export function registerIpc(): void {
+  // 记忆后台任务的推送：发给所有窗口（当前单窗口，保持通用）
+  setMemoryNotifier((event) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC.memoryEvent, event)
+    }
+  })
+
   // 卡片
   ipcMain.handle(IPC.cardsList, () => getCards())
   ipcMain.handle(IPC.cardsSave, (_e, card: Card) => saveCard(card))
@@ -143,6 +172,58 @@ export function registerIpc(): void {
   // 创建分支不查「正在回复中」：它只读原对话、往新对话里写，不会跟流式回复抢同一条记录
   ipcMain.handle(IPC.convsBranch, (_e, cardId: string, convId: string, messageId: string) =>
     branchConversation(cardId, convId, messageId)
+  )
+
+  // 记忆（按对话保存；规范见 docs/tech.md §9）
+  ipcMain.handle(IPC.memoryGet, async (_e, cardId: string, convId: string): Promise<MemoryView> => {
+    const { memory, messageCount } = await getConversationMemory(cardId, convId)
+    return { memory, messageCount, busy: isMemoryBusy(cardId, convId) }
+  })
+  ipcMain.handle(
+    IPC.memoryAddEntry,
+    (_e, cardId: string, convId: string, layer: unknown, content: unknown) =>
+      addMemoryEntry(cardId, convId, requireMemoryLayer(layer), String(content ?? ''))
+  )
+  ipcMain.handle(
+    IPC.memoryUpdateEntry,
+    (
+      _e,
+      cardId: string,
+      convId: string,
+      layer: unknown,
+      entryId: string,
+      content: unknown
+    ) =>
+      updateMemoryEntry(
+        cardId,
+        convId,
+        requireMemoryLayer(layer),
+        String(entryId ?? ''),
+        String(content ?? '')
+      )
+  )
+  ipcMain.handle(
+    IPC.memoryDeleteEntry,
+    (_e, cardId: string, convId: string, layer: unknown, entryId: string) =>
+      deleteMemoryEntry(
+        cardId,
+        convId,
+        requireMemoryLayer(layer),
+        String(entryId ?? '')
+      )
+  )
+  ipcMain.handle(
+    IPC.memoryClearLayer,
+    (_e, cardId: string, convId: string, layer: unknown) =>
+      clearMemoryLayer(cardId, convId, requireMemoryLayer(layer))
+  )
+  ipcMain.handle(
+    IPC.memoryOrganize,
+    async (_e, cardId: string, convId: string, mode: unknown) => {
+      const normalizeMode: MemoryOrganizeMode = mode === 'rebuild' ? 'rebuild' : 'normal'
+      await organizeNow(cardId, convId, normalizeMode)
+      return { ok: true }
+    }
   )
 
   // 剪贴板：走主进程而不是 navigator.clipboard（后者依赖文档焦点，会偶发不生效）
@@ -264,6 +345,12 @@ function normalizeDeleteMode(mode: unknown): DeleteMode {
   return mode === 'reply-too' || mode === 'from-here' ? mode : 'only'
 }
 
+/** 记忆层级兜底：只认 short / long / permanent */
+function requireMemoryLayer(layer: unknown): MemoryLayer {
+  if (!isMemoryLayer(layer)) throw new Error('记忆层级不正确')
+  return layer
+}
+
 /** 「重新输出」的选项（渲染层传来，字段都不可信，用前逐个兜底） */
 interface RegenerateOpts {
   /** true = 连这条之后的内容一起去掉；缺省/false = 只重写这一条 */
@@ -325,16 +412,46 @@ async function sendChat(
   if (!meta.historyIds.includes(cardId)) patch.historyIds = [cardId, ...meta.historyIds]
   await updateMeta(patch)
 
-  const messages: WireMessage[] = buildMessages(card, conv.messages.slice(0, -1), content)
+  const memoryContext = memoryContextFor(card, conv)
+  const messages: WireMessage[] = buildMessages(
+    card,
+    conv.messages.slice(0, -1),
+    content,
+    memoryContext
+  )
 
   const { provider, model, stream, params } = resolveChatTarget(card)
 
   const key = streamKey(cardId, convId)
-  const job = runStream(sender, cardId, convId, provider, params, model, stream, messages)
+  const job = runStream(
+    sender,
+    cardId,
+    convId,
+    provider,
+    params,
+    model,
+    stream,
+    messages,
+    undefined,
+    memoryContext.enabled
+  )
     .catch(() => {})
     .finally(() => sendJobs.delete(key))
   sendJobs.set(key, job)
   return { ok: true }
+}
+
+/**
+ * 本次请求的记忆上下文：卡片开关 + 「记忆设定」窗口 + 这个对话的三层记忆。
+ * 关闭记忆时 buildMessages 会退回全量历史、不插入记忆块。
+ */
+function memoryContextFor(card: Card, conv: Conversation): MemoryContext {
+  const config = resolveMemoryConfig(card)
+  return {
+    memory: conv.memory,
+    recentCount: config.recentCount,
+    enabled: config.enabled
+  }
 }
 
 /**
@@ -395,10 +512,28 @@ async function regenerate(
   )
 
   // 重发没有新的用户输入，currentText 省略（不该凭空多出一条空的用户消息）
-  const messages: WireMessage[] = buildMessages(card, history)
+  const latest = await getConversation(cardId, convId)
+  const memoryContext = latest ? memoryContextFor(card, latest) : undefined
+  const messages: WireMessage[] = buildMessages(
+    card,
+    history,
+    undefined,
+    memoryContext
+  )
 
   const key = streamKey(cardId, convId)
-  const job = runStream(sender, cardId, convId, provider, params, model, stream, messages, insertAt)
+  const job = runStream(
+    sender,
+    cardId,
+    convId,
+    provider,
+    params,
+    model,
+    stream,
+    messages,
+    insertAt,
+    memoryContext?.enabled === true
+  )
     .catch(() => {})
     .finally(() => sendJobs.delete(key))
   sendJobs.set(key, job)
@@ -416,13 +551,34 @@ async function runStream(
   stream: boolean,
   messages: WireMessage[],
   /** 新回复落在这个下标（重新输出的「只重写这条」）；缺省 = 追加到末尾 */
-  insertAt?: number
+  insertAt?: number,
+  /** 这张卡的记忆是否开启；关闭时仍剥离标记，但不写记忆 */
+  memoryEnabled = false
 ): Promise<void> {
   const emit = (ev: ChatEvent): void => {
     if (!sender.isDestroyed()) sender.send(IPC.chatEvent, ev)
   }
 
-  let acc = ''
+  let rawAcc = ''
+  const filter = new MemoryFilter()
+
+  const onDelta = (chunk: string): void => {
+    rawAcc += chunk
+    filter.push(chunk, (visible) => {
+      if (visible !== '') emit({ type: 'delta', cardId, convId, text: visible })
+    })
+  }
+
+  // 流式用过滤器（处理跨块的标记前缀）；非流式没有 delta，直接解析整段
+  const parseFinal = (): ParsedMemoryMarkers => {
+    if (stream) {
+      return filter.finish((visible) => {
+        if (visible !== '') emit({ type: 'delta', cardId, convId, text: visible })
+      })
+    }
+    return parseMemoryMarkers(rawAcc)
+  }
+
   try {
     const result = await requestChat(
       cardId,
@@ -432,14 +588,15 @@ async function runStream(
       model,
       stream,
       messages,
-      (chunk) => {
-        acc += chunk
-        emit({ type: 'delta', cardId, convId, text: chunk })
-      }
+      onDelta
     )
-    if (result.text !== '') acc = result.text
+    if (result.text !== '') rawAcc = result.text
 
-    if (!result.aborted && acc.trim() === '') {
+    const parsed = parseFinal()
+    const cleaned = parsed.cleaned
+    const entries = memoryEnabled ? parsed.entries : []
+
+    if (!result.aborted && cleaned.trim() === '' && entries.length === 0) {
       emit({
         type: 'error',
         cardId,
@@ -450,42 +607,101 @@ async function runStream(
       return
     }
 
-    if (acc !== '') await appendAssistant(cardId, convId, acc, insertAt)
+    if (cleaned !== '' || entries.length > 0) {
+      await appendAssistant(cardId, convId, cleaned, insertAt, entries)
+    }
+    if (cleaned.trim() === '' && entries.length > 0) {
+      notifyMemoryEvent({
+        type: 'noticed',
+        cardId,
+        convId,
+        message: 'AI 把这条回复写进了记忆'
+      })
+    }
     emit(
       result.aborted
-        ? { type: 'aborted', cardId, convId, partial: acc }
-        : { type: 'done', cardId, convId, fullText: acc }
+        ? { type: 'aborted', cardId, convId, partial: cleaned }
+        : { type: 'done', cardId, convId, fullText: cleaned }
     )
+
+    // 正常完成才自动整理；用户主动中止不额外花请求
+    if (memoryEnabled && !result.aborted) scheduleMemoryJobs(cardId, convId)
   } catch (err) {
     const mapped =
       err instanceof ChatError
         ? err
         : new ChatError('回复失败', err instanceof Error ? err.message : String(err))
 
-    // 出错前已经吐出来的部分也要留住，不让用户白等（半截回复同样落在该落的位置）
-    if (acc !== '') await appendAssistant(cardId, convId, acc, insertAt).catch(() => {})
+    // 出错前已经吐出来的部分也要留住（闭合的记忆标记照写，未闭合的丢弃）
+    const parsed = parseFinal()
+    const cleaned = parsed.cleaned
+    const entries = memoryEnabled ? parsed.entries : []
+    if (cleaned !== '' || entries.length > 0) {
+      await appendAssistant(cardId, convId, cleaned, insertAt, entries).catch(() => {})
+    }
     emit({ type: 'error', cardId, convId, message: mapped.message, detail: mapped.detail })
   }
 }
 
 /**
- * 写入一条 assistant 消息；对话已被删除则丢弃。
+ * 写入一条 assistant 消息（已剥离记忆标记）；对话已被删除则丢弃。
  * `insertAt` 合法就插回那个位置（重新输出的「只重写这条」），否则追加到末尾。
+ * 记忆标记里的条目与消息**同一次落盘**；只有标记没有正文时不插入空气泡。
  */
 async function appendAssistant(
   cardId: string,
   convId: string,
   content: string,
-  insertAt?: number
+  insertAt?: number,
+  memoryEntries: string[] = []
 ): Promise<void> {
   const conv = await getConversation(cardId, convId)
   if (!conv) return
+
   const at =
     typeof insertAt === 'number' && insertAt >= 0 && insertAt <= conv.messages.length
       ? insertAt
       : conv.messages.length
-  const msg: ChatMessage = { id: randomUUID(), role: 'assistant', content, ts: Date.now() }
-  conv.messages.splice(at, 0, msg)
-  conv.updatedAt = Date.now()
-  await saveConversation(conv)
+
+  const memory = normalizeMemory(conv.memory)
+  // 记忆条目的来源：这条回复前面最近的一句用户消息 + 这条回复本身
+  const anchorUser = conv.messages
+    .slice(0, at)
+    .reverse()
+    .find((m) => m.role === 'user')
+  const now = Date.now()
+
+  let msgId: string | null = null
+  if (content !== '') {
+    msgId = randomUUID()
+    const msg: ChatMessage = { id: msgId, role: 'assistant', content, ts: now }
+    conv.messages.splice(at, 0, msg)
+    // 新回复插进已覆盖区域时，它和它之后都算「未写进记忆」
+    if (at < memory.coveredCount) memory.coveredCount = at
+    conv.updatedAt = now
+  }
+
+  const fresh = dedupeEntryTexts(
+    [...memory.short, ...memory.long, ...memory.permanent],
+    memoryEntries
+  )
+  if (fresh.length > 0) {
+    const sourceMessageIds = [anchorUser?.id, msgId].filter(
+      (id): id is string => typeof id === 'string' && id !== ''
+    )
+    memory.short.push(
+      ...fresh.map((text) => ({
+        id: randomUUID(),
+        content: text,
+        source: 'ai' as const,
+        sourceMessageIds,
+        createdAt: now,
+        updatedAt: now
+      }))
+    )
+    memory.revision += 1
+  }
+
+  conv.memory = memory
+  if (content !== '' || fresh.length > 0) await saveConversation(conv)
 }

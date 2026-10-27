@@ -10,6 +10,7 @@ import ChatSettingsBar from '../components/ChatSettingsBar'
 import MarkdownText from '../components/MarkdownText'
 import {
   ArrowLeftIcon,
+  BookIcon,
   BranchIcon,
   ChatIcon,
   CopyIcon,
@@ -38,6 +39,7 @@ export default function ChatPage({ cardId, convId }: Props) {
 
   const title = useChatStore((s) => s.title)
   const messages = useChatStore((s) => s.messages)
+  const memory = useChatStore((s) => s.memory)
   const loading = useChatStore((s) => s.loading)
   const stream = useChatStore((s) => s.streams[`${cardId}:${convId}`])
   const open = useChatStore((s) => s.open)
@@ -460,6 +462,14 @@ export default function ChatPage({ cardId, convId }: Props) {
           <span className="page-title chat-head-name">{card.name}</span>
           <span className="chat-head-sub">{title || '对话'}</span>
         </div>
+        <button
+          className="icon-btn chat-memory-btn"
+          title="记忆"
+          onClick={() => navigate({ name: 'memory', cardId, convId })}
+        >
+          <BookIcon size={20} />
+          {memory?.lastError && <span className="chat-memory-dot" />}
+        </button>
       </header>
 
       <ChatSettingsBar card={card} onPatch={(patch) => void patchCard(patch)} />

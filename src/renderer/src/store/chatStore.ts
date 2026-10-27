@@ -5,7 +5,7 @@
 // 保证「流式气泡」与「落盘消息」无缝衔接。
 
 import { create } from 'zustand'
-import type { ChatEvent, ChatMessage } from '@shared/types'
+import type { ChatEvent, ChatMessage, ConversationMemory } from '@shared/types'
 
 /** 单条流的状态 */
 export interface StreamState {
@@ -28,6 +28,8 @@ interface ChatState {
   convId: string
   title: string
   messages: ChatMessage[]
+  /** 当前对话的三层记忆（聊天页「记忆」入口的小红点、已覆盖判断用） */
+  memory: ConversationMemory | null
   loading: boolean
   /** 键 → 流状态。离开聊天页后仍保留，回到该对话能看到生成中的回复 */
   streams: Record<string, StreamState>
@@ -52,6 +54,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   convId: '',
   title: '',
   messages: [],
+  memory: null,
   loading: false,
   streams: {},
 
@@ -59,15 +62,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (subscribed) return
     subscribed = true
     window.api.chat.onEvent((ev) => handleEvent(ev))
+    // 记忆后台任务：只关心当前对话。失败挂小红点，成功重读一次拿最新水位/记忆
+    window.api.memory.onEvent((ev) => {
+      const s = useChatStore.getState()
+      if (s.cardId !== ev.cardId || s.convId !== ev.convId) return
+      if (ev.type === 'error') {
+        if (s.memory) {
+          useChatStore.setState({
+            memory: { ...s.memory, lastError: ev.message }
+          })
+        }
+        return
+      }
+      if (ev.type === 'updated') void s.reload()
+    })
   },
 
   open: async (cardId, convId, silent = false) => {
     set({ key: keyOf(cardId, convId), cardId, convId, loading: !silent })
     try {
       const conv = await window.api.convs.get(cardId, convId)
-      set({ messages: conv?.messages ?? [], title: conv?.title ?? '', loading: false })
+      set({
+        messages: conv?.messages ?? [],
+        title: conv?.title ?? '',
+        memory: conv?.memory ?? null,
+        loading: false
+      })
     } catch {
-      set({ messages: [], loading: false })
+      set({ messages: [], memory: null, loading: false })
     }
   },
 
@@ -76,13 +98,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (key === null || cardId === '' || convId === '') return
     try {
       const conv = await window.api.convs.get(cardId, convId)
-      set({ messages: conv?.messages ?? [], title: conv?.title ?? '' })
+      set({
+        messages: conv?.messages ?? [],
+        title: conv?.title ?? '',
+        memory: conv?.memory ?? null
+      })
     } catch {
       /* 读不到就维持现状，别把界面清空 */
     }
   },
 
-  close: () => set({ key: null, cardId: '', convId: '', title: '', messages: [] }),
+  close: () =>
+    set({ key: null, cardId: '', convId: '', title: '', messages: [], memory: null }),
 
   send: async (text) => {
     const { cardId, convId } = get()
@@ -147,11 +174,13 @@ async function settleStream(
   const isOpen = useChatStore.getState().key === key
   let messages: ChatMessage[] | null = null
   let title: string | null = null
+  let memory: ConversationMemory | null | undefined
   if (isOpen) {
     try {
       const conv = await window.api.convs.get(cardId, convId)
       messages = conv?.messages ?? []
       title = conv?.title ?? null
+      memory = conv?.memory ?? null
     } catch {
       /* 读不到就维持现状，别把界面清空 */
     }
@@ -166,6 +195,7 @@ async function settleStream(
     return {
       messages: messages ?? s.messages,
       title: title ?? s.title,
+      memory: memory === undefined ? s.memory : memory,
       loading: false,
       streams
     }

@@ -200,6 +200,13 @@ function buildImportedCard(raw: Partial<Card>, newId: string): Card {
     stream: typeof raw.stream === 'boolean' ? raw.stream : undefined,
     temperature: num(raw.temperature) ?? undefined,
     maxTokens: num(raw.maxTokens) ?? undefined,
+    // 记忆设置：自有格式往返时一并带走；老文件没有这些字段 = 用默认值
+    memoryEnabled: typeof raw.memoryEnabled === 'boolean' ? raw.memoryEnabled : undefined,
+    memoryRecentCount: num(raw.memoryRecentCount) ?? undefined,
+    memoryShortLimit: num(raw.memoryShortLimit) ?? undefined,
+    memoryShortBatch: num(raw.memoryShortBatch) ?? undefined,
+    memoryLongLimit: num(raw.memoryLongLimit) ?? undefined,
+    memoryLongBatch: num(raw.memoryLongBatch) ?? undefined,
     createdAt: now,
     updatedAt: now
   }

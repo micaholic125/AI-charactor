@@ -306,6 +306,75 @@ export async function requestChat(
   }
 }
 
+// ---------- 一次性补全（记忆整理用：非流式、不占聊天流式锁） ----------
+
+/**
+ * 发一次非流式请求，拿整段文本。
+ * **不注册 `cardId:convId` 的流式锁**——记忆整理与正常聊天可以同时进行；
+ * 超时 60 秒，外部 signal（退出应用）可以中止。规范见 docs/tech.md §9.4。
+ */
+export async function requestCompletion(
+  provider: Provider,
+  params: ChatParams,
+  model: string,
+  messages: WireMessage[],
+  signal?: AbortSignal
+): Promise<string> {
+  const url = buildUrl(provider)
+  const effectiveModel = (model ?? '').trim()
+  if (effectiveModel === '') throw new ChatError('请先填写模型名称')
+
+  const controller = new AbortController()
+  let timedOut = false
+  const onAbort = (): void => controller.abort()
+  if (signal) {
+    if (signal.aborted) throw new ChatError('记忆整理已中止')
+    signal.addEventListener('abort', onAbort, { once: true })
+  }
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 60_000)
+
+  const abortError = (): ChatError =>
+    timedOut
+      ? new ChatError('记忆整理超时，稍后会自动重试', '请求超过 60 秒被中止')
+      : new ChatError('记忆整理已中止')
+
+  try {
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: headers(provider),
+        body: JSON.stringify({
+          model: effectiveModel,
+          messages,
+          temperature: params.temperature,
+          max_tokens: params.maxTokens,
+          stream: false
+        }),
+        signal: controller.signal
+      })
+    } catch (err) {
+      if (controller.signal.aborted) throw abortError()
+      throw err instanceof ChatError ? err : mapNetworkError(err)
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw mapHttpError(res.status, text)
+    }
+
+    const result = await readWholeReply(res, controller)
+    if (result.aborted) throw abortError()
+    return result.text
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
 // ---------- 连通性测试 ----------
 
 /** 非流式小请求探测（max_tokens:8）；成功返回 {ok:true}，失败抛出已映射的中文错误。测的是传入的这条供应商自己的模型 */

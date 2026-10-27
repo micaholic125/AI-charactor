@@ -9,6 +9,7 @@ import HomePage from './pages/HomePage'
 import MinePage from './pages/MinePage'
 import CardDetailPage from './pages/CardDetailPage'
 import ChatPage from './pages/ChatPage'
+import MemoryPage from './pages/MemoryPage'
 import CardEditorPage from './pages/CardEditorPage'
 import SettingsPage from './pages/SettingsPage'
 import ProviderPage from './pages/ProviderPage'
@@ -27,6 +28,8 @@ function ViewRouter() {
       return <CardDetailPage key={view.cardId} cardId={view.cardId} />
     case 'chat':
       return <ChatPage key={`${view.cardId}:${view.convId}`} cardId={view.cardId} convId={view.convId} />
+    case 'memory':
+      return <MemoryPage key={`${view.cardId}:${view.convId}`} cardId={view.cardId} convId={view.convId} />
     case 'settings':
       return <SettingsPage />
     case 'editor':
@@ -38,6 +41,7 @@ function ViewRouter() {
 export default function App() {
   const view = useAppStore((s) => s.view)
   const init = useAppStore((s) => s.init)
+  const toast = useAppStore((s) => s.toast)
   const subscribeChat = useChatStore((s) => s.subscribe)
 
   useEffect(() => {
@@ -48,6 +52,14 @@ export default function App() {
   useEffect(() => {
     subscribeChat()
   }, [subscribeChat])
+
+  // 记忆后台任务的轻提示（例如「只写入了记忆、没有正文」）
+  useEffect(() => {
+    const off = window.api.memory.onEvent((ev) => {
+      if (ev.type === 'noticed') toast(ev.message)
+    })
+    return off
+  }, [toast])
 
   const showTabBar = view.name === 'home' || view.name === 'mine' || view.name === 'apiConfig'
 
