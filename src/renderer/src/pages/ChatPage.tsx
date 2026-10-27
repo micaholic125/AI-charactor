@@ -125,21 +125,62 @@ export default function ChatPage({ cardId, convId }: Props) {
 
   // ---------- 消息操作 ----------
 
+  /**
+   * 改 / 删 / 重发了一条**已被记忆覆盖**的消息之后，问一句要不要顺手修正记忆。
+   * 「只改原文」放最右（更安全、更常用），「一起整理记忆」多花一次请求。见 docs/design.md §4。
+   */
+  const askMemoryRefresh = (anchorIndex: number): void => {
+    askConfirm({
+      title: '这条消息已经写进记忆了',
+      message:
+        '「只改原文」记忆保持不变，AI 下次可能仍按旧记忆回答；' +
+        '「一起整理记忆」会多调用一次 AI 修正记忆区。',
+      altText: '一起整理记忆',
+      onAlt: () => {
+        void (async () => {
+          try {
+            await window.api.memory.refresh(cardId, convId, anchorIndex)
+            toast('已开始按修改后的内容整理记忆')
+          } catch (err) {
+            toast(err instanceof Error ? err.message : '整理记忆失败', 'error')
+          }
+        })()
+      },
+      // 「只改原文」：什么都不用做，记忆保持原样
+      onConfirm: () => {},
+      confirmText: '只改原文'
+    })
+  }
+
+  /** 目标消息在下标 `index`，且它已经被记忆接住了吗（要在操作前判断） */
+  const isCovered = (index: number): boolean => index < (memory?.coveredCount ?? 0)
+
   /** 只改文字、不重新请求（AI 消息的「修改」、用户消息的「只改文字」都走这里） */
-  const applyEdit = async (messageId: string, text: string, dropAfter: boolean) => {
+  const applyEdit = async (
+    messageId: string,
+    text: string,
+    dropAfter: boolean,
+    after?: () => void
+  ) => {
     try {
       await window.api.convs.updateMessage(cardId, convId, messageId, text, dropAfter)
       await reload()
       toast('已修改')
+      after?.()
     } catch (err) {
       toast(err instanceof Error ? err.message : '修改失败', 'error')
     }
   }
 
   /** 重新输出：成功时由 chatStore 挂上流式气泡，失败才在这里提示 */
-  const doRegenerate = async (messageId: string, opts: { dropAfter: boolean; content?: string }) => {
+  const doRegenerate = async (
+    messageId: string,
+    opts: { dropAfter: boolean; content?: string },
+    after?: () => void
+  ) => {
     const err = await regenerate(messageId, opts)
     if (err !== null) toast(err, 'error')
+    else after?.()
   }
 
   const copyMessage = async (m: ChatMessage) => {
@@ -165,8 +206,11 @@ export default function ChatPage({ cardId, convId }: Props) {
     // 空的或没改过：静默返回（沿用对话重命名那套手感）
     if (text === '' || text === m.content) return
 
+    // 是否已被记忆覆盖要在改动前判断——改完 coveredCount 会跟着退
+    const refreshAfter = isCovered(index) ? (): void => askMemoryRefresh(index) : undefined
+
     if (m.role === 'assistant') {
-      void applyEdit(m.id, text, false)
+      void applyEdit(m.id, text, false, refreshAfter)
       return
     }
 
@@ -176,7 +220,7 @@ export default function ChatPage({ cardId, convId }: Props) {
         title: '修改这条消息',
         message: '改完让 AI 重新回答。',
         confirmText: '重新回答',
-        onConfirm: () => doRegenerate(m.id, { dropAfter: true, content: text })
+        onConfirm: () => doRegenerate(m.id, { dropAfter: true, content: text }, refreshAfter)
       })
       return
     }
@@ -186,15 +230,16 @@ export default function ChatPage({ cardId, convId }: Props) {
         `「重新回答」会让 AI 重新回复，后面的 ${after} 条消息一并删掉；` +
         '「只改文字」后面的消息原样保留，AI 不会重新回答。',
       altText: '只改文字',
-      onAlt: () => applyEdit(m.id, text, false),
+      onAlt: () => applyEdit(m.id, text, false, refreshAfter),
       confirmText: '重新回答',
       danger: true,
-      onConfirm: () => doRegenerate(m.id, { dropAfter: true, content: text })
+      onConfirm: () => doRegenerate(m.id, { dropAfter: true, content: text }, refreshAfter)
     })
   }
 
   /** 撤回：删掉这条 + 紧随的 AI 回复，文字放回输入框 */
-  const recallMessage = (m: ChatMessage) => {
+  const recallMessage = (m: ChatMessage, index: number) => {
+    const refreshAfter = isCovered(index) ? (): void => askMemoryRefresh(index) : undefined
     askConfirm({
       title: '撤回这条消息',
       message: '确定撤回这条消息吗？它和 AI 的回复会一起删掉，文字会放回输入框。',
@@ -208,6 +253,7 @@ export default function ChatPage({ cardId, convId }: Props) {
           await reload()
           inputRef.current?.focus()
           toast('已撤回，改完可以重发')
+          refreshAfter?.()
         } catch (err) {
           toast(err instanceof Error ? err.message : '撤回失败', 'error')
         }
@@ -217,11 +263,13 @@ export default function ChatPage({ cardId, convId }: Props) {
 
   const deleteMessage = (m: ChatMessage, index: number) => {
     const after = messages.length - index - 1
+    const refreshAfter = isCovered(index) ? (): void => askMemoryRefresh(index) : undefined
     const doDelete = async (mode: DeleteMode) => {
       try {
         await window.api.convs.deleteMessage(cardId, convId, m.id, mode)
         await reload()
         toast('已删除')
+        refreshAfter?.()
       } catch (err) {
         toast(err instanceof Error ? err.message : '删除失败', 'error')
       }
@@ -265,12 +313,13 @@ export default function ChatPage({ cardId, convId }: Props) {
 
   const regenerateMessage = (m: ChatMessage, index: number) => {
     const after = messages.length - index - 1
+    const refreshAfter = isCovered(index) ? (): void => askMemoryRefresh(index) : undefined
     if (after === 0) {
       askConfirm({
         title: '重新输出',
         message: '它是最后一条消息，重新输出会把它整个换掉。',
         confirmText: '重新输出',
-        onConfirm: () => doRegenerate(m.id, { dropAfter: true })
+        onConfirm: () => doRegenerate(m.id, { dropAfter: true }, refreshAfter)
       })
       return
     }
@@ -280,10 +329,10 @@ export default function ChatPage({ cardId, convId }: Props) {
         `「删掉后面重来」会把这条 AI 回复和它后面的 ${after} 条消息一起删掉再重新生成；` +
         '「只重写这条」后面的消息原样保留。',
       altText: '只重写这条',
-      onAlt: () => doRegenerate(m.id, { dropAfter: false }),
+      onAlt: () => doRegenerate(m.id, { dropAfter: false }, refreshAfter),
       confirmText: '删掉后面重来',
       danger: true,
-      onConfirm: () => doRegenerate(m.id, { dropAfter: true })
+      onConfirm: () => doRegenerate(m.id, { dropAfter: true }, refreshAfter)
     })
   }
 
@@ -369,7 +418,7 @@ export default function ChatPage({ cardId, convId }: Props) {
                       className="msg-action msg-action-danger"
                       disabled={pending}
                       title={pending ? BUSY_TIP : '撤回这条消息'}
-                      onClick={() => recallMessage(m)}
+                      onClick={() => recallMessage(m, i)}
                     >
                       <UndoIcon size={14} />
                       撤回

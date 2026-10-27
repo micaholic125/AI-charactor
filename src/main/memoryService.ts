@@ -13,7 +13,9 @@ import type {
 import {
   emptyMemory,
   memoryChars,
+  memoryEntryKey,
   normalizeMemory,
+  normalizeMemoryContent,
   resolveMemoryConfig
 } from '@shared/memory'
 import {
@@ -26,12 +28,15 @@ import { getCurrentProvider } from './providers'
 import { ChatError, requestCompletion } from './chatClient'
 import {
   buildConsolidationMessages,
+  buildRefreshMessages,
   buildSummaryMessages,
   dedupeEntryTexts,
   extractConsolidationText,
   extractEntryStrings,
   parseJsonLoose,
-  type ConsolidationTarget
+  parseRefreshResult,
+  type ConsolidationTarget,
+  type RefreshLayers
 } from './memory'
 
 /** 一轮任务里每步的结果：applied = 真的改了记忆；none = 没触发/放弃；error = 失败（已记退避） */
@@ -40,6 +45,9 @@ type StepResult = 'applied' | 'none' | 'error'
 const MAX_STEPS = 3
 const CHUNK_MAX_MESSAGES = 30
 const CHUNK_MAX_CHARS = 6000
+const REFRESH_AROUND = 10
+const REFRESH_RECENT = 20
+const REFRESH_MAX_CHARS = 6000
 const TASK_TEMPERATURE = 0.2
 const TASK_MAX_TOKENS = 4096
 const BACKOFF_BASE = 60_000
@@ -48,6 +56,8 @@ const BACKOFF_MAX = 15 * 60_000
 interface MemoryJob {
   controller: AbortController
   rerun: boolean
+  /** 排队的「一起整理记忆」锚点；null = 没有。锚点缺失 = 不限定位置 */
+  pendingRefresh: { anchor?: number } | null
   promise: Promise<void>
 }
 
@@ -86,28 +96,66 @@ export function pendingMemoryJobCount(): number {
  * `manual` = 用户点了「现在整理一次」：忽略退避与溢出阈值，立即整理最多 3 段。
  */
 export function scheduleMemoryJobs(cardId: string, convId: string, manual = false): void {
-  const key = keyOf(cardId, convId)
-  const existing = jobs.get(key)
+  const existing = jobs.get(keyOf(cardId, convId))
   if (existing) {
     existing.rerun = true
     return
   }
+  startJob(cardId, convId, manual, (signal) => runLoop(cardId, convId, signal, manual))
+}
 
+/**
+ * 安排一次「修正记忆」（改/删/重发已覆盖消息之后）。
+ * 同一对话正在跑别的记忆任务时排队，等它结束后再跑，不并发。
+ */
+export function scheduleMemoryRefresh(
+  cardId: string,
+  convId: string,
+  anchor?: number
+): void {
+  const existing = jobs.get(keyOf(cardId, convId))
+  if (existing) {
+    existing.pendingRefresh = { anchor }
+    return
+  }
+  startJob(cardId, convId, false, (signal) =>
+    runRefresh(cardId, convId, anchor, signal)
+  )
+}
+
+/** 建一个任务槽并跑 `run`；结束后按排队情况补跑（先修正、再兜底总结） */
+function startJob(
+  cardId: string,
+  convId: string,
+  manual: boolean,
+  run: (signal: AbortSignal) => Promise<void>
+): void {
+  const key = keyOf(cardId, convId)
   const controller = new AbortController()
   const job: MemoryJob = {
     controller,
     rerun: false,
+    pendingRefresh: null,
     promise: Promise.resolve()
   }
   jobs.set(key, job)
   notify({ type: 'busy', cardId, convId, busy: true })
 
-  job.promise = runLoop(cardId, convId, controller.signal, manual)
+  job.promise = run(controller.signal)
     .catch(() => {})
     .finally(() => {
       if (jobs.get(key) === job) jobs.delete(key)
       notify({ type: 'busy', cardId, convId, busy: false })
-      if (job.rerun) scheduleMemoryJobs(cardId, convId, manual)
+      if (job.pendingRefresh !== null) {
+        scheduleMemoryRefresh(cardId, convId, job.pendingRefresh.anchor)
+        // 修正之后还要补跑兜底总结的话，挂到新任务上
+        if (job.rerun) {
+          const next = jobs.get(key)
+          if (next) next.rerun = true
+        }
+      } else if (job.rerun) {
+        scheduleMemoryJobs(cardId, convId, manual)
+      }
     })
 }
 
@@ -129,6 +177,7 @@ export async function organizeNow(
     const existing = jobs.get(keyOf(cardId, convId))
     if (existing) {
       existing.rerun = false
+      existing.pendingRefresh = null
       existing.controller.abort()
       await existing.promise.catch(() => {})
     }
@@ -490,6 +539,165 @@ async function applyConsolidation(
       createdAt: now,
       updatedAt: now
     })
+    memory.revision += 1
+    memory.lastRunAt = now
+    memory.failCount = 0
+    memory.lastError = undefined
+    memory.retryAfter = undefined
+    latest.memory = memory
+    await saveConversation(latest)
+    return true
+  })
+}
+
+// ---------- 修正记忆（改/删/重发已覆盖消息之后，见 docs/tech.md §9.6） ----------
+
+/** 取「修改点附近 ±10 条」再拼上「最近 20 条」，去重、按时间顺序、总字数不超过 6000 */
+function collectRefreshMessages(messages: ChatMessage[], anchor?: number): ChatMessage[] {
+  const indices = new Set<number>()
+  if (anchor !== undefined) {
+    const start = Math.max(0, anchor - REFRESH_AROUND)
+    const end = Math.min(messages.length - 1, anchor + REFRESH_AROUND)
+    for (let i = start; i <= end; i++) indices.add(i)
+  }
+  for (let i = Math.max(0, messages.length - REFRESH_RECENT); i < messages.length; i++) {
+    indices.add(i)
+  }
+
+  const picked = [...indices].sort((a, b) => a - b).map((i) => messages[i])
+  // 超长时从最新的往旧保留，避免把刚刚修改的那段挤掉
+  const out: ChatMessage[] = []
+  let chars = 0
+  for (let i = picked.length - 1; i >= 0; i--) {
+    const size = (picked[i]?.content?.length ?? 0) + 8
+    if (out.length > 0 && chars + size > REFRESH_MAX_CHARS) break
+    chars += size
+    out.unshift(picked[i])
+  }
+  return out
+}
+
+/** 改写后的一层：内容没变的条目沿用原来的 id 与来源（分支过滤还靠它） */
+function rebuildLayer(texts: string[], existing: MemoryEntry[], now: number): MemoryEntry[] {
+  const byKey = new Map<string, MemoryEntry>()
+  for (const entry of existing) {
+    const key = memoryEntryKey(entry.content)
+    if (key !== '') byKey.set(key, entry)
+  }
+
+  const seen = new Set<string>()
+  const out: MemoryEntry[] = []
+  for (const text of texts) {
+    const content = normalizeMemoryContent(text)
+    if (content === '') continue
+    const key = memoryEntryKey(content)
+    if (key === '' || seen.has(key)) continue
+    seen.add(key)
+
+    const old = byKey.get(key)
+    if (old) {
+      out.push({ ...old, content, sourceMessageIds: [...old.sourceMessageIds] })
+    } else {
+      out.push({
+        id: randomUUID(),
+        content,
+        source: 'repair',
+        sourceMessageIds: [],
+        createdAt: now,
+        updatedAt: now
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 修正记忆：按修改点附近 + 最近的聊天记录重写三层。
+ * 乐观并发：请求前记下 revision，回来时对不上（用户中途改过记忆）就放弃，绝不覆盖。
+ */
+async function runRefresh(
+  cardId: string,
+  convId: string,
+  anchor: number | undefined,
+  signal: AbortSignal
+): Promise<void> {
+  const card = getCard(cardId)
+  const conv = await getConversation(cardId, convId)
+  if (!card || !conv) return
+
+  const config = resolveMemoryConfig(card)
+  if (!config.enabled) return
+
+  const memory = normalizeMemory(conv.memory)
+  const messages = collectRefreshMessages(conv.messages, anchor)
+  if (messages.length === 0) return
+
+  const revision = memory.revision
+  const hadEntries = memory.short.length + memory.long.length + memory.permanent.length > 0
+
+  try {
+    let provider: Provider | undefined
+    try {
+      provider = getCurrentProvider()
+    } catch {
+      provider = undefined
+    }
+    if (!provider) throw new ChatError('还没有配置供应商，请到「API 配置」里添加一个')
+    const model = (card.model ?? '').trim() || provider.model
+    if (model.trim() === '') throw new ChatError('请先填写模型名称')
+
+    const raw = await requestCompletion(
+      provider,
+      { temperature: TASK_TEMPERATURE, maxTokens: TASK_MAX_TOKENS },
+      model,
+      buildRefreshMessages(card.name, memory, messages),
+      signal
+    )
+
+    const layers = parseRefreshResult(raw)
+    if (!layers) throw new ChatError('记忆整理返回的格式不正确', raw.trim().slice(0, 300))
+    const empty =
+      layers.short.length === 0 && layers.long.length === 0 && layers.permanent.length === 0
+    if (empty && hadEntries) {
+      throw new ChatError('记忆整理没有返回可用的内容', raw.trim().slice(0, 300))
+    }
+
+    const applied = await applyRefresh(cardId, convId, revision, layers)
+    if (applied) notify({ type: 'updated', cardId, convId })
+  } catch (err) {
+    if (signal.aborted) return
+    const mapped =
+      err instanceof ChatError
+        ? err
+        : new ChatError(err instanceof Error ? err.message : String(err))
+    await recordFailure(cardId, convId, mapped)
+    notify({
+      type: 'error',
+      cardId,
+      convId,
+      message: mapped.message,
+      detail: mapped.detail
+    })
+  }
+}
+
+async function applyRefresh(
+  cardId: string,
+  convId: string,
+  revision: number,
+  layers: RefreshLayers
+): Promise<boolean> {
+  return withConvLock(cardId, convId, async () => {
+    const latest = await getConversation(cardId, convId)
+    if (!latest) return false
+
+    const memory = normalizeMemory(latest.memory)
+    if (memory.revision !== revision) return false
+
+    const now = Date.now()
+    memory.short = rebuildLayer(layers.short, memory.short, now)
+    memory.long = rebuildLayer(layers.long, memory.long, now)
+    memory.permanent = rebuildLayer(layers.permanent, memory.permanent, now)
     memory.revision += 1
     memory.lastRunAt = now
     memory.failCount = 0

@@ -217,6 +217,7 @@ export const IPC = {
   memoryDeleteEntry: 'memory:delete-entry',
   memoryClearLayer: 'memory:clear-layer',
   memoryOrganize: 'memory:organize',
+  memoryRefresh: 'memory:refresh',
   memoryEvent: 'memory:event',
   copyText: 'app:copy-text',
   chatSend: 'chat:send',
@@ -397,6 +398,11 @@ export interface Api {
       convId: string,
       mode?: MemoryOrganizeMode
     ): Promise<{ ok: boolean }>
+    /**
+     * 修正记忆：按修改点附近的聊天记录重写三层记忆（用于改/删/重发一条已被覆盖的消息）。
+     * 立即返回，进度经 `memory:onEvent` 推送。`anchorIndex` 是被改消息的下标。
+     */
+    refresh(cardId: string, convId: string, anchorIndex?: number): Promise<{ ok: boolean }>
     /** 订阅记忆后台任务事件，返回取消订阅函数 */
     onEvent(cb: (ev: MemoryEvent) => void): () => void
   }

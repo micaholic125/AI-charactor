@@ -78,6 +78,7 @@ import {
   notifyMemoryEvent,
   organizeNow,
   scheduleMemoryJobs,
+  scheduleMemoryRefresh,
   setMemoryNotifier
 } from './memoryService'
 
@@ -222,6 +223,16 @@ export function registerIpc(): void {
     async (_e, cardId: string, convId: string, mode: unknown) => {
       const normalizeMode: MemoryOrganizeMode = mode === 'rebuild' ? 'rebuild' : 'normal'
       await organizeNow(cardId, convId, normalizeMode)
+      return { ok: true }
+    }
+  )
+  ipcMain.handle(
+    IPC.memoryRefresh,
+    (_e, cardId: string, convId: string, anchorIndex: unknown) => {
+      const anchor = typeof anchorIndex === 'number' && Number.isFinite(anchorIndex)
+        ? Math.max(0, Math.floor(anchorIndex))
+        : undefined
+      scheduleMemoryRefresh(cardId, convId, anchor)
       return { ok: true }
     }
   )

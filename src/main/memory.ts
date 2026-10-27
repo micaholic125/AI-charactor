@@ -1,7 +1,7 @@
 // 记忆纯逻辑：标记解析、流式过滤器、JSON 容错、去重、总结提示词。
 // 只做纯函数/无副作用；网络与落盘在 memoryService.ts。规范见 docs/tech.md §9.3。
 
-import type { ChatMessage, MemoryEntry } from '@shared/types'
+import type { ChatMessage, ConversationMemory, MemoryEntry } from '@shared/types'
 import { memoryEntryKey, normalizeMemoryContent } from '@shared/memory'
 import type { WireMessage } from './worldbook'
 
@@ -255,6 +255,75 @@ export function dedupeEntryTexts(existing: MemoryEntry[], incoming: string[]): s
     out.push(text)
   }
   return out
+}
+
+// ---------- 修正记忆（见 docs/tech.md §9.6） ----------
+
+export interface RefreshLayers {
+  short: string[]
+  long: string[]
+  permanent: string[]
+}
+
+/** 修正提示词：当前三层记忆 + 修改点附近/最近的聊天记录 → 完整三层 JSON */
+export function buildRefreshMessages(
+  cardName: string,
+  memory: ConversationMemory,
+  messages: ChatMessage[]
+): WireMessage[] {
+  const layerText = (entries: MemoryEntry[]): string =>
+    entries.length > 0 ? entries.map((entry) => `- ${entry.content}`).join('\n') : '（无）'
+  const dialogue = messages
+    .map((message) => `${message.role === 'user' ? '用户' : 'AI'}：${message.content}`)
+    .join('\n')
+
+  return [
+    {
+      role: 'system',
+      content:
+        '你是记忆整理助手。根据当前三层记忆和最近的聊天记录，输出修正后的完整三层记忆。\n' +
+        '只输出 JSON，不要解释、不要代码围栏：\n' +
+        '{"short":["一句话事实"],"long":["压缩后的故事或设定"],"permanent":["身份、关系、重大转折"]}\n' +
+        '规则：合并重复；新信息覆盖旧信息；删掉与聊天记录矛盾的旧内容；' +
+        'short 放最新的事实（最多 25 条），long 放压缩后的故事与设定，permanent 放最稳定的身份与关系；' +
+        '每条不超过 300 字。'
+    },
+    {
+      role: 'user',
+      content:
+        `角色：${cardName}\n\n` +
+        `【当前短期记忆】\n${layerText(memory.short)}\n\n` +
+        `【当前长期记忆】\n${layerText(memory.long)}\n\n` +
+        `【当前永久记忆】\n${layerText(memory.permanent)}\n\n` +
+        `【聊天记录片段】\n${dialogue}`
+    }
+  ]
+}
+
+/**
+ * 解析修正结果：必须是含 short / long / permanent 之一的对象。
+ * 解析失败或形状完全不对 → `null`（调用方按失败处理，原记忆完全不变）。
+ */
+export function parseRefreshResult(raw: string): RefreshLayers | null {
+  const parsed = parseJsonLoose(raw)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+
+  const obj = parsed as Record<string, unknown>
+  if (!('short' in obj) && !('long' in obj) && !('permanent' in obj)) return null
+
+  const pickLayer = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return []
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => normalizeMemoryContent(item))
+      .filter((item) => item !== '')
+  }
+
+  return {
+    short: pickLayer(obj.short),
+    long: pickLayer(obj.long),
+    permanent: pickLayer(obj.permanent)
+  }
 }
 
 // ---------- 提示词 ----------

@@ -129,6 +129,8 @@ const api: Api = {
       invoke<ConversationMemory>(IPC.memoryClearLayer, cardId, convId, layer),
     organize: (cardId: string, convId: string, mode?: MemoryOrganizeMode) =>
       invoke<{ ok: boolean }>(IPC.memoryOrganize, cardId, convId, mode ?? 'normal'),
+    refresh: (cardId: string, convId: string, anchorIndex?: number) =>
+      invoke<{ ok: boolean }>(IPC.memoryRefresh, cardId, convId, anchorIndex),
     onEvent: (cb: (ev: MemoryEvent) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, ev: MemoryEvent): void => cb(ev)
       ipcRenderer.on(IPC.memoryEvent, listener)
