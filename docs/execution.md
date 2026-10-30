@@ -457,6 +457,7 @@
 验证记录（2026-10-30 完成发布）：7.5 用户验收通过后正式打包，产物 `AI聊天卡-Setup-1.0.0.exe`（107MB）与 `AI聊天卡-1.0.0-便携版.exe`（106MB）。
 **验证清单 10**：静默安装 exit 0；桌面快捷方式「AI聊天卡」指向 `%LOCALAPPDATA%\Programs\ai-chat-cards\AI聊天卡.exe`；安装版连续启动两次，窗口标题正确、数据目录 `%APPDATA%\ai-chat-cards` 里 7 个对话文件完好；静默卸载后程序目录与快捷方式清除、**数据仍在**。
 **便携版**：复制到系统临时目录双击运行，窗口正常打开、正常关闭。安装版未发起真实聊天请求（避免未经授权的 API 费用），聊天功能已在开发阶段多次验证。
+**GitHub Release**：2026-10-30 发布 `v1.0.0`（https://github.com/micaholic125/AI-charactor/releases/tag/v1.0.0），资产为 `AI-Chat-Cards-1.0.0-Setup.exe` / `AI-Chat-Cards-1.0.0-Portable.exe`（GitHub 不支持中文 asset 名）。仓库当前为**私有**，仅登录后可访问。
 
 ## 3. 验证清单（阶段完成标准引用此表）
 
