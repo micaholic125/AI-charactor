@@ -434,6 +434,7 @@ type MemoryEvent =
 - 图标：build/icon.png（≥256×256，builder 自动转 .ico）
 - `.npmrc` 内置国内镜像（registry/electron_mirror/electron_builder_binaries_mirror → npmmirror）；备用环境变量：ELECTRON_MIRROR、ELECTRON_BUILDER_BINARIES_MIRROR
 - 未签名 exe 首次运行 SmartScreen 提示，README 已说明
+- **GitHub Release 的 asset 文件名不支持中文**（实测上传 `测试中文-1.0.0.txt` 会变成 `-1.0.0.txt`，中文被直接丢弃）。所以本地产物用中文名，上传到 Release 时改用 ASCII 名：`AI-Chat-Cards-1.0.0-Setup.exe` / `AI-Chat-Cards-1.0.0-Portable.exe`
 
 ## 9. 记忆系统（三层记忆，main/memory.ts + main/memoryService.ts）
 
