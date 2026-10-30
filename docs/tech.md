@@ -431,6 +431,7 @@ type MemoryEvent =
 ## 8. 打包
 
 - electron-builder：appId `com.aichatcards.app`、productName `AI聊天卡`、targets = NSIS(x64, 一键安装, 桌面快捷方式) + portable、`files: ['out/**']` + asar
+- 开源合规：`LICENSE`（MIT）与 `THIRD-PARTY-NOTICES.md` 通过 `extraResources` 打进安装包 `resources/`；第三方声明由脚本按「运行时真正打进 bundle 的依赖」生成（含 MIT / ISC / BSD-3-Clause 全文与版权行），Electron 与 Chromium 的许可文件由 electron-builder 自动附带
 - 图标：build/icon.png（≥256×256，builder 自动转 .ico）
 - `.npmrc` 内置国内镜像（registry/electron_mirror/electron_builder_binaries_mirror → npmmirror）；备用环境变量：ELECTRON_MIRROR、ELECTRON_BUILDER_BINARIES_MIRROR
 - 未签名 exe 首次运行 SmartScreen 提示，README 已说明

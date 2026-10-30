@@ -1,0 +1,31 @@
+name: 功能建议
+description: 想要新功能，或觉得现有交互不好用
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        功能建议不一定都会实现：项目故意保持简单，面向不懂技术的用户。请说明「你想解决什么问题」，而不只是「加一个按钮」。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      placeholder: 例如：聊久了记不住前面发生的事，每次都要重新说明
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望怎么解决
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你试过的替代方案（可选）
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他信息（可选）
+      description: 截图、类似产品的做法等

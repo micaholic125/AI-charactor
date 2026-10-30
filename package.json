@@ -3,9 +3,26 @@
   "version": "1.0.0",
   "description": "AI 聊天卡 - Windows AI 角色聊天应用",
   "main": "./out/main/index.js",
-  "author": "AI聊天卡",
+  "author": "micaholic125",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/micaholic125/AI-charactor.git"
+  },
+  "homepage": "https://github.com/micaholic125/AI-charactor#readme",
+  "bugs": {
+    "url": "https://github.com/micaholic125/AI-charactor/issues"
+  },
+  "keywords": [
+    "electron",
+    "react",
+    "ai",
+    "chat",
+    "roleplay",
+    "聊天卡",
+    "角色扮演"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },

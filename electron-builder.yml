@@ -6,6 +6,11 @@ directories:
 files:
   - out/**
 asar: true
+extraResources:
+  - from: LICENSE
+    to: LICENSE.txt
+  - from: THIRD-PARTY-NOTICES.md
+    to: THIRD-PARTY-NOTICES.md
 win:
   icon: build/icon.png
   target:

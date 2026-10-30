@@ -97,6 +97,17 @@ node node_modules/electron/install.js
 - `docs/execution.md` — 执行步骤与阶段标准
 - `devlog/` — 每日开发日志（自动记录）
 
+## 开源许可
+
+本项目以 **MIT 许可证**开源，版权归 **micaholic125** 所有，详见 [LICENSE](LICENSE)。
+
+- 安装包内分发的第三方开源组件及其许可全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+- 参与贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题请按 [SECURITY.md](SECURITY.md) 的说明私下报告，不要公开开 issue
+- 社区行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+**隐私说明**：应用不会向任何服务器上传你的卡片、对话或记忆。你填写的 API Key 保存在本机 `%APPDATA%\ai-chat-cards\` 的配置文件中（未加密），只有发起聊天时才会发送给你自己配置的 API 服务商。
+
 ## 已知限制
 
 - **AI 回复按 Markdown 排版**（加粗 / 斜体 / 标题 / 列表 / 表格 / 引用 / 代码块等）；**数学公式（LaTeX）暂不支持**
