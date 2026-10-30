@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-cards",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "AI 聊天卡 - Windows AI 角色聊天应用",
   "main": "./out/main/index.js",
   "author": "AI聊天卡",
